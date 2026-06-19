@@ -30,6 +30,7 @@ sealed class WindowGuard : IDisposable
     private volatile bool _fired;                 // once-per-session latch
     private IntPtr _target;                       // window focused when recording started
     private IntPtr _sinkHandle;                   // our own window — never a "change"
+    private IntPtr _overlayHandle;                // the REC overlay — also never a "change"
     private System.Threading.Timer? _debounce;    // delayed re-check
 
     public WindowGuard()
@@ -46,6 +47,13 @@ sealed class WindowGuard : IDisposable
     // The sink window's handle, so the guard never mistakes our own window for a context
     // change. Set once the sink form's handle exists.
     public IntPtr SinkHandle { get => _sinkHandle; set => _sinkHandle = value; }
+
+    // The overlay window's handle, so the guard never treats our own REC badge as a
+    // context change (it shouldn't ever take focus, but ignore it defensively).
+    public IntPtr OverlayHandle { get => _overlayHandle; set => _overlayHandle = value; }
+
+    private bool IsOwnWindow(IntPtr hwnd) =>
+        hwnd == _target || hwnd == _sinkHandle || hwnd == _overlayHandle;
 
     // Called on the worker thread when recording starts: remember the focused window and
     // arm the hook.
@@ -79,7 +87,7 @@ sealed class WindowGuard : IDisposable
         int idObject, int idChild, uint dwEventThread, uint dwmsEventTime)
     {
         if (!_recording || _fired) return;
-        if (hwnd == IntPtr.Zero || hwnd == _target || hwnd == _sinkHandle) return;
+        if (hwnd == IntPtr.Zero || IsOwnWindow(hwnd)) return;
 
         // Re-check after a short delay so a momentary focus grab doesn't trigger us.
         // (One-shot; resetting it on each event coalesces a flurry of changes.)
@@ -94,7 +102,7 @@ sealed class WindowGuard : IDisposable
     {
         if (!_recording || _fired) return;
         IntPtr now = GetForegroundWindow();
-        if (now == IntPtr.Zero || now == _target || now == _sinkHandle) return;
+        if (now == IntPtr.Zero || IsOwnWindow(now)) return;
         Trigger();
     }
 

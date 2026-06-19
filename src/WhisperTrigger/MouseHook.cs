@@ -6,9 +6,14 @@ namespace WhisperTrigger;
 // Raises events on the Windows Forms message-pump thread; callers must not block in handlers.
 sealed class MouseHook : IDisposable
 {
-    public event EventHandler? ToggleDown;  // XButton2 (forward) pressed
-    public event EventHandler? PttDown;     // XButton1 (back) pressed
-    public event EventHandler? PttUp;       // XButton1 (back) released
+    public event EventHandler? ToggleDown;  // mapped toggle button pressed
+    public event EventHandler? PttDown;     // mapped push-to-talk button pressed
+    public event EventHandler? PttUp;       // mapped push-to-talk button released
+
+    // Which physical side button drives each action. Configurable at runtime; a button
+    // not assigned to either action is passed through to other apps unchanged.
+    public MouseButtonId ToggleButton { get; set; } = MouseButtonId.XButton2;
+    public MouseButtonId PttButton    { get; set; } = MouseButtonId.XButton1;
 
     private const int WH_MOUSE_LL  = 14;
     private const int HC_ACTION     = 0;
@@ -68,18 +73,22 @@ sealed class MouseHook : IDisposable
             if (msg is WM_XBUTTONDOWN or WM_XBUTTONUP)
             {
                 var data = Marshal.PtrToStructure<MSLLHOOKSTRUCT>(lParam);
-                int button = (short)((data.mouseData >> 16) & 0xFFFF);
+                int raw = (short)((data.mouseData >> 16) & 0xFFFF);
+                var id = raw == XBUTTON1 ? MouseButtonId.XButton1
+                       : raw == XBUTTON2 ? MouseButtonId.XButton2
+                       : MouseButtonId.None;
 
-                if (button == XBUTTON2)
+                if (id != MouseButtonId.None && id == ToggleButton)
                 {
                     if (msg == WM_XBUTTONDOWN) ToggleDown?.Invoke(this, EventArgs.Empty);
                     return (IntPtr)1; // swallow — RDP never sees it
                 }
-                if (button == XBUTTON1)
+                if (id != MouseButtonId.None && id == PttButton)
                 {
                     (msg == WM_XBUTTONDOWN ? PttDown : PttUp)?.Invoke(this, EventArgs.Empty);
                     return (IntPtr)1;
                 }
+                // Unmapped side button → fall through and pass it on to other apps.
             }
         }
         return CallNextHookEx(_handle, nCode, wParam, lParam);
