@@ -258,14 +258,48 @@ sealed class TrayApp : ApplicationContext
 
     private void WaitThenRestoreClipboard()
     {
-        _client.WaitForIdle(timeoutMs: 10_000);
         string? toRestore = _savedClipboard;
         _savedClipboard = null;
-        if (toRestore is not null)
-            _sync.Post(_ => {
-                try { Clipboard.SetText(toRestore); }
+        if (toRestore is null) return; // nothing saved → nothing we could clobber
+
+        // TypeWhisper transcribes *after* recording stops, then pastes by putting the
+        // transcription on the clipboard and sending Ctrl+V. Restoring the old clipboard
+        // too early clobbers that transcription, so TypeWhisper pastes our old text instead
+        // — the "it pasted what I copied before" bug, worst on long paragraphs that take
+        // longer to transcribe. Wait until the clipboard actually changes away from the
+        // saved text (that's TypeWhisper writing the transcription), then give the paste
+        // time to land before putting the old clipboard back.
+        WaitForTranscriptionThenPaste(toRestore);
+
+        _sync.Post(_ => {
+            try { Clipboard.SetText(toRestore); }
+            catch { }
+        }, null);
+    }
+
+    // Blocks the worker thread until TypeWhisper has written its transcription to the
+    // clipboard (or we give up), then waits a buffer for the Ctrl+V paste to complete.
+    // Clipboard reads are marshalled to the UI thread (clipboard access must be STA).
+    private void WaitForTranscriptionThenPaste(string original)
+    {
+        const int ChangeTimeoutMs = 20_000; // long paragraphs can take a while to transcribe
+        const int PasteBufferMs   = 1200;   // headroom for Ctrl+V to land (incl. RDP latency)
+
+        var deadline = DateTime.UtcNow.AddMilliseconds(ChangeTimeoutMs);
+        bool changed = false;
+        while (DateTime.UtcNow < deadline)
+        {
+            string? current = null;
+            _sync.Send(_ => {
+                try { current = Clipboard.ContainsText() ? Clipboard.GetText() : null; }
                 catch { }
             }, null);
+            if (current is not null && current != original) { changed = true; break; }
+            Thread.Sleep(150);
+        }
+        // Saw the transcription land → wait out the paste. Didn't (identical text, or no
+        // paste happened) → just a short settle so we don't hang on the old clipboard.
+        Thread.Sleep(changed ? PasteBufferMs : 600);
     }
 
     // Runs on a timer (thread-pool) thread. Pings the API and, on a state change,

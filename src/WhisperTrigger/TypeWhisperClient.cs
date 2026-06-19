@@ -26,19 +26,6 @@ sealed class TypeWhisperClient : IDisposable
     public bool Start() => Post("/v1/dictation/start");
     public bool Stop()  => Post("/v1/dictation/stop");
 
-    // Polls until TypeWhisper reports idle (transcription + paste complete), then
-    // waits an extra buffer so the Ctrl+V paste has time to land before we restore.
-    public void WaitForIdle(int timeoutMs = 10_000)
-    {
-        var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
-        while (DateTime.UtcNow < deadline)
-        {
-            if (QueryRecording() == false) break;
-            Thread.Sleep(150);
-        }
-        Thread.Sleep(500); // buffer for TypeWhisper to finish the actual paste
-    }
-
     // Returns null if the status endpoint is unreachable or the response shape is unknown.
     public bool? QueryRecording()
     {
