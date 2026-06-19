@@ -1,0 +1,6 @@
+# .NET build output
+bin/
+obj/
+
+# Playwright MCP session files
+.playwright-mcp/
