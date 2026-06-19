@@ -1,0 +1,79 @@
+name: Release
+
+# Tag a commit `vX.Y.Z` and push the tag to cut a release:
+#   git tag v1.0.1 && git push origin v1.0.1
+# This builds a self-contained installer with Velopack and publishes it as a
+# GitHub Release that the app auto-updates from.
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write   # needed for vpk to create the GitHub Release
+
+jobs:
+  release:
+    runs-on: windows-latest   # building the Windows installer requires Windows
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Install Velopack CLI (vpk)
+        shell: pwsh
+        run: |
+          dotnet tool install -g vpk --version 0.0.1298
+          "$env:USERPROFILE\.dotnet\tools" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+
+      - name: Derive version from tag
+        id: ver
+        shell: pwsh
+        run: |
+          $v = "${{ github.ref_name }}" -replace '^v', ''
+          "version=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Publish (self-contained, win-x64)
+        shell: pwsh
+        run: >
+          dotnet publish src/WhisperTrigger/WhisperTrigger.csproj
+          -c Release -r win-x64 --self-contained true
+          -p:Version=${{ steps.ver.outputs.version }}
+          -o publish
+
+      # Pull the previous release so vpk can compute a delta update package.
+      # Expected to fail on the very first release (no prior release exists yet).
+      - name: Download previous release (for deltas)
+        continue-on-error: true
+        shell: pwsh
+        run: >
+          vpk download github
+          --repoUrl https://github.com/${{ github.repository }}
+          --token ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pack installer
+        shell: pwsh
+        run: >
+          vpk pack
+          --packId WhisperTrigger
+          --packVersion ${{ steps.ver.outputs.version }}
+          --packDir publish
+          --mainExe whisper-trigger.exe
+          --packTitle "Whisper Trigger"
+          --packAuthors "modarken"
+          --icon src/WhisperTrigger/icon.ico
+
+      - name: Publish GitHub Release
+        shell: pwsh
+        run: >
+          vpk upload github
+          --repoUrl https://github.com/${{ github.repository }}
+          --token ${{ secrets.GITHUB_TOKEN }}
+          --tag ${{ github.ref_name }}
+          --releaseName "Whisper Trigger ${{ steps.ver.outputs.version }}"
+          --merge
+          --publish

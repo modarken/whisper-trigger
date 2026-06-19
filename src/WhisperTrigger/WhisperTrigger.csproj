@@ -11,6 +11,6 @@
     <UseWindowsForms>true</UseWindowsForms>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="Velopack" Version="0.0.942" />
+    <PackageReference Include="Velopack" Version="0.0.1298" />
   </ItemGroup>
 </Project>

@@ -22,6 +22,27 @@ Trigger [TypeWhisper](https://www.typewhisper.com) dictation via mouse side butt
 | ● Red | Recording |
 | ○ Outlined | Mouse buttons disabled (pass-through) |
 
+## Releasing
+
+Releases are built and published automatically by GitHub Actions when you push a
+version tag:
+
+```bash
+git tag v1.0.1
+git push origin v1.0.1
+```
+
+The [release workflow](.github/workflows/release.yml) publishes a self-contained
+build (no .NET install required on the user's machine), packs it with
+[Velopack](https://velopack.io), and creates a GitHub Release containing:
+
+- `whisper-trigger-win-Setup.exe` — the installer to hand to users
+- Update packages the running app reads on launch to update itself
+
+The tag drives the version (`v1.0.1` → `1.0.1`); the `<Version>` in the `.csproj`
+is only the default for local debug builds. No secrets to configure — the workflow
+uses the built-in `GITHUB_TOKEN`.
+
 ## Notes
 
 - Clipboard is saved before dictation starts and restored after TypeWhisper finishes pasting (plain text only — images/files on the clipboard are not preserved)
