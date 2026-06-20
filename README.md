@@ -90,8 +90,9 @@ The app self-updates from GitHub Releases:
 
 ## Notes
 
-- Clipboard is saved before dictation starts and restored after TypeWhisper finishes
-  pasting (plain text only — images/files on the clipboard are not preserved).
+- Whisper Trigger does not touch the clipboard — TypeWhisper handles its own clipboard
+  save/restore when it pastes. (Note: across a Remote Desktop boundary, RDP clipboard
+  redirection can leave the dictated text on the clipboard; that's an RDP limitation.)
 - Recording auto-stops after the configured timeout (default 5 minutes) if you forget to
   release/toggle.
 - If focus leaves your target window mid-dictation, Whisper Trigger returns to it before

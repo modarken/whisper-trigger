@@ -30,7 +30,6 @@ sealed class TrayApp : ApplicationContext
     private readonly ToolStripMenuItem _toggleItem;
     private Icon _icon;
     private volatile bool _recording; // written on worker thread, read on both
-    private string? _savedClipboard;  // worker-thread only
     private System.Threading.Timer? _recordingTimeout; // worker-thread only
     private System.Threading.Timer? _healthTimer;      // periodic TypeWhisper reachability poll
     private volatile bool _apiReachable = true;        // last heartbeat result
@@ -155,32 +154,26 @@ sealed class TrayApp : ApplicationContext
                 {
                     case Cmd.Toggle:
                         bool isRecording = _client.QueryRecording() ?? _recording;
-                        if (isRecording) { DoStop(); WaitThenRestoreClipboard(); }
-                        else             { CaptureClipboard(); DoStart(); }
+                        if (isRecording) DoStop();
+                        else             DoStart();
                         break;
                     case Cmd.PttDown:
-                        CaptureClipboard();
                         DoStart();
                         break;
                     case Cmd.PttUp:
                         // May already be stopped if a context change redirected the paste.
-                        if (_recording) { DoStop(); WaitThenRestoreClipboard(); }
+                        if (_recording) DoStop();
                         break;
                     case Cmd.ContextLost:
                         // Focus left the target window; OnContextChanged has already put
                         // focus on the original window (or the sink), so this stop pastes
                         // the transcription there rather than into a random app.
-                        if (_recording)
-                        {
-                            DoStop();
-                            WaitThenRestoreClipboard();
-                        }
+                        if (_recording) DoStop();
                         break;
                     case Cmd.AutoStop:
                         if (_recording)
                         {
                             DoStop();
-                            WaitThenRestoreClipboard();
                             _sync.Post(_ => Notify(
                                 $"Recording auto-stopped after {_settings.AutoStopMinutes} minutes.",
                                 ToolTipIcon.Warning), null);
@@ -193,7 +186,6 @@ sealed class TrayApp : ApplicationContext
                         _guard.Disarm();
                         _recordingTimeout?.Dispose();
                         _recordingTimeout = null;
-                        _savedClipboard = null;
                         _recording = false;
                         _sync.Post(_ => ApplyState(false), null);
                         break;
@@ -201,7 +193,6 @@ sealed class TrayApp : ApplicationContext
             }
             catch (Exception ex)
             {
-                _savedClipboard = null;
                 Log.Write($"worker error on {cmd}: {ex}");
                 _sync.Post(_ => Notify(ex.Message, ToolTipIcon.Error), null);
             }
@@ -260,67 +251,6 @@ sealed class TrayApp : ApplicationContext
             if (!confirmed)
                 Notify("Stop command was not confirmed — TypeWhisper may be out of sync.", ToolTipIcon.Warning);
         }, null);
-    }
-
-    private void CaptureClipboard()
-    {
-        string? saved = null;
-        bool failed = false;
-        _sync.Send(_ => {
-            try { if (Clipboard.ContainsText()) saved = Clipboard.GetText(); }
-            catch { failed = true; }
-        }, null);
-        _savedClipboard = saved;
-        if (failed)
-            _sync.Post(_ => Notify(
-                "Could not read clipboard — it will not be restored after dictation.",
-                ToolTipIcon.Warning), null);
-    }
-
-    private void WaitThenRestoreClipboard()
-    {
-        string? toRestore = _savedClipboard;
-        _savedClipboard = null;
-        if (toRestore is null) return; // nothing saved → nothing we could clobber
-
-        // TypeWhisper transcribes *after* recording stops, then pastes by putting the
-        // transcription on the clipboard and sending Ctrl+V. Restoring the old clipboard
-        // too early clobbers that transcription, so TypeWhisper pastes our old text instead
-        // — the "it pasted what I copied before" bug, worst on long paragraphs that take
-        // longer to transcribe. Wait until the clipboard actually changes away from the
-        // saved text (that's TypeWhisper writing the transcription), then give the paste
-        // time to land before putting the old clipboard back.
-        WaitForTranscriptionThenPaste(toRestore);
-
-        _sync.Post(_ => {
-            try { Clipboard.SetText(toRestore); }
-            catch { }
-        }, null);
-    }
-
-    // Blocks the worker thread until TypeWhisper has written its transcription to the
-    // clipboard (or we give up), then waits a buffer for the Ctrl+V paste to complete.
-    // Clipboard reads are marshalled to the UI thread (clipboard access must be STA).
-    private void WaitForTranscriptionThenPaste(string original)
-    {
-        const int ChangeTimeoutMs = 20_000; // long paragraphs can take a while to transcribe
-        const int PasteBufferMs   = 1200;   // headroom for Ctrl+V to land (incl. RDP latency)
-
-        var deadline = DateTime.UtcNow.AddMilliseconds(ChangeTimeoutMs);
-        bool changed = false;
-        while (DateTime.UtcNow < deadline)
-        {
-            string? current = null;
-            _sync.Send(_ => {
-                try { current = Clipboard.ContainsText() ? Clipboard.GetText() : null; }
-                catch { }
-            }, null);
-            if (current is not null && current != original) { changed = true; break; }
-            Thread.Sleep(150);
-        }
-        // Saw the transcription land → wait out the paste. Didn't (identical text, or no
-        // paste happened) → just a short settle so we don't hang on the old clipboard.
-        Thread.Sleep(changed ? PasteBufferMs : 600);
     }
 
     // Runs on a timer (thread-pool) thread. Pings the API and, on a state change,

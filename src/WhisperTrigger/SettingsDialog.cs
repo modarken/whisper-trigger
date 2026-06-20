@@ -38,10 +38,10 @@ sealed class SettingsDialog : Form
     {
         Result = new Settings
         {
-            ToggleButton   = current.ToggleButton,
-            PttButton      = current.PttButton,
+            ToggleButton    = current.ToggleButton,
+            PttButton       = current.PttButton,
             AutoStopMinutes = current.AutoStopMinutes,
-            AutoUpdate     = current.AutoUpdate,
+            AutoUpdate      = current.AutoUpdate,
         };
 
         Text            = "Whisper Trigger — Settings";
