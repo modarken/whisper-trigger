@@ -55,6 +55,7 @@ sealed class MouseHook : IDisposable
 
     private IntPtr _handle;
     private readonly LowLevelMouseProc _proc; // must be kept alive to prevent GC
+    private long _lastCallbackTicks = Environment.TickCount64; // updated on every mouse event
 
     public MouseHook()
     {
@@ -63,10 +64,37 @@ sealed class MouseHook : IDisposable
         if (_handle == IntPtr.Zero)
             throw new InvalidOperationException(
                 $"Failed to install low-level mouse hook (Win32 error {Marshal.GetLastWin32Error()}).");
+        Log.Write("mouse hook installed");
+    }
+
+    // How long since the hook last received ANY mouse event. A healthy hook fires on every
+    // mouse move; if this keeps climbing while the machine is in use, the hook has been
+    // dropped (timeout, session/desktop switch, RDP reconnect) and should be reinstalled.
+    public long IdleMillis => Environment.TickCount64 - _lastCallbackTicks;
+
+    public bool IsInstalled => _handle != IntPtr.Zero;
+
+    // Tears down and re-establishes the hook. Must run on the message-pump thread that
+    // owns the hook (low-level hooks require their installing thread to pump messages).
+    // Returns true if the hook is active afterwards.
+    public bool Reinstall()
+    {
+        var old = _handle;
+        _handle = IntPtr.Zero;
+        if (old != IntPtr.Zero) UnhookWindowsHookEx(old);
+        _handle = SetWindowsHookEx(WH_MOUSE_LL, _proc, GetModuleHandle(null), 0);
+        _lastCallbackTicks = Environment.TickCount64; // give the fresh hook a clean baseline
+        if (_handle == IntPtr.Zero)
+            Log.Write($"mouse hook reinstall FAILED (Win32 error {Marshal.GetLastWin32Error()})");
+        return _handle != IntPtr.Zero;
     }
 
     private IntPtr HookCallback(int nCode, IntPtr wParam, IntPtr lParam)
     {
+        if (nCode == HC_ACTION)
+        {
+            _lastCallbackTicks = Environment.TickCount64; // proof the hook is alive
+        }
         if (nCode == HC_ACTION && Enabled)
         {
             int msg = (int)wParam;

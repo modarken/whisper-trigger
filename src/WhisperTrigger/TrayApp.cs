@@ -10,7 +10,7 @@ namespace WhisperTrigger;
 
 sealed class TrayApp : ApplicationContext
 {
-    private enum Cmd { Toggle, PttDown, PttUp, AutoStop, ContextLost }
+    private enum Cmd { Toggle, PttDown, PttUp, AutoStop, ContextLost, Reset }
 
     private readonly BlockingCollection<Cmd> _queue = new(new ConcurrentQueue<Cmd>());
     private readonly SynchronizationContext _sync;
@@ -50,6 +50,7 @@ sealed class TrayApp : ApplicationContext
         _sync   = SynchronizationContext.Current ?? throw new InvalidOperationException("No sync context.");
         _client = new TypeWhisperClient();
         _settings = Settings.Load();
+        Log.Write($"app started v{CurrentVersion()}");
 
         // Context menu
         _statusItem  = new ToolStripMenuItem("● Idle") { Enabled = false };
@@ -66,12 +67,14 @@ sealed class TrayApp : ApplicationContext
         _toggleItem = new ToolStripMenuItem("Toggle dictation", null,
             (_, _) => _queue.TryAdd(Cmd.Toggle));
         menu.Items.Add(_toggleItem);
+        menu.Items.Add(new ToolStripMenuItem("Reset (re-arm buttons)", null, OnReset));
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(_settingsItem);
         menu.Items.Add(_startAtLoginItem);
         menu.Items.Add(_checkUpdatesItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(new ToolStripMenuItem("About", null, OnAbout));
+        menu.Items.Add(new ToolStripMenuItem("Open logs folder", null, (_, _) => Log.OpenFolder()));
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(new ToolStripMenuItem("Exit", null, (_, _) => ExitThread()));
 
@@ -114,6 +117,12 @@ sealed class TrayApp : ApplicationContext
         // Heartbeat: poll TypeWhisper's API so the tray reflects when it goes down,
         // not only when a button press fails. First beat after a short settle delay.
         _healthTimer = new System.Threading.Timer(HealthCheck, null, 2500, HealthIntervalMs);
+
+        // Windows can silently drop a low-level mouse hook (lock/unlock, RDP reconnect),
+        // which is the suspected cause of "buttons stopped working until I restarted it."
+        // We don't auto-heal — but we log session changes so the log shows what happened
+        // right before a failure, and the Reset menu item re-arms the hook on demand.
+        SystemEvents.SessionSwitch += OnSessionSwitch;
 
         var cts = _startupCts;
         Task.Run(async () => {
@@ -177,11 +186,23 @@ sealed class TrayApp : ApplicationContext
                                 ToolTipIcon.Warning), null);
                         }
                         break;
+                    case Cmd.Reset:
+                        // Clear any recording state TypeWhisper or we might still think is on,
+                        // returning to a clean idle state without a process restart.
+                        try { _client.Stop(); } catch { }
+                        _guard.Disarm();
+                        _recordingTimeout?.Dispose();
+                        _recordingTimeout = null;
+                        _savedClipboard = null;
+                        _recording = false;
+                        _sync.Post(_ => ApplyState(false), null);
+                        break;
                 }
             }
             catch (Exception ex)
             {
                 _savedClipboard = null;
+                Log.Write($"worker error on {cmd}: {ex}");
                 _sync.Post(_ => Notify(ex.Message, ToolTipIcon.Error), null);
             }
         }
@@ -334,6 +355,26 @@ sealed class TrayApp : ApplicationContext
         }
         catch { /* heartbeat is best-effort */ }
         finally { Interlocked.Exchange(ref _healthBusy, 0); }
+    }
+
+    // Log-only: records session changes (lock/unlock, RDP connect/disconnect) so the log
+    // shows what preceded a "buttons stopped working" event. We deliberately don't act on
+    // these — recovery is the user's call via Reset.
+    private void OnSessionSwitch(object? sender, SessionSwitchEventArgs e) =>
+        Log.Write($"session switch: {e.Reason}");
+
+    // Manual recovery (right-click → Reset): re-arm the mouse hook and clear any stuck
+    // recording state, so a dropped hook can be fixed without closing and reopening the app.
+    private void OnReset(object? sender, EventArgs e)
+    {
+        // Log how long the hook had been silent first — a large value here is strong
+        // evidence the hook really had been dropped (vs. a problem elsewhere).
+        Log.Write($"manual reset (hook idle was {_hook.IdleMillis}ms)");
+        bool ok = _hook.Reinstall();
+        Log.Write($"reset: hook reinstall -> {(ok ? "ok" : "FAILED")}");
+        _queue.TryAdd(Cmd.Reset); // worker clears recording/clipboard/timer state
+        Notify(ok ? "Reset — mouse buttons re-armed." : "Reset could not re-arm the hook; please restart.",
+            ok ? ToolTipIcon.Info : ToolTipIcon.Error);
     }
 
     // ---- UI updates (main thread) ----------------------------------------------
@@ -559,6 +600,7 @@ sealed class TrayApp : ApplicationContext
         {
             _startupCts.Cancel();
             _startupCts.Dispose();
+            SystemEvents.SessionSwitch -= OnSessionSwitch;
             _queue.CompleteAdding();
             _healthTimer?.Dispose();
             _recordingTimeout?.Dispose();
