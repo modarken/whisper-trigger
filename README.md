@@ -102,6 +102,69 @@ The app self-updates from GitHub Releases:
   installs, or manages TypeWhisper itself.
 - Only one instance runs at a time; launching a second copy exits immediately.
 
+## Troubleshooting
+
+### TypeWhisper says "API server enabled, but not running"
+
+The full message looks like:
+
+```
+API server enabled, but not running
+The process cannot access the file because it is being used by another process.;
+cleanup failed: Cannot access a disposed object. Object name: 'System.Net.HttpListener'.
+```
+
+Whisper Trigger reports this state but can't fix it — the problem is on the Windows
+side, in TypeWhisper's own listener. Despite the wording, **this usually does not mean
+another process holds the port.** More often nothing is listening at all.
+
+TypeWhisper's API server is built on `HttpListener`, i.e. HTTP.sys. HTTP.sys refuses to
+bind any port that falls inside a Windows *excluded TCP port range*, and reports it as
+`ERROR_SHARING_VIOLATION` — the "used by another process" text above. WinNAT (installed
+alongside Hyper-V, WSL2, and Docker Desktop) reserves 100-port blocks for NAT at service
+start, and if one of those blocks covers TypeWhisper's port, the API server can't start.
+The blocks are re-picked on every boot, so this can appear and disappear seemingly at
+random.
+
+**Diagnose** — check whether the port is inside an excluded range:
+
+```powershell
+netsh int ipv4 show excludedportrange protocol=tcp
+```
+
+If TypeWhisper's port (default `8978`) falls in any listed range, that's the cause. Note
+that a raw socket test is *not* a valid check here — plain `TcpListener` binds excluded
+ports fine, only HTTP.sys refuses them.
+
+**Fix** — the durable fix is to keep WinNAT's blocks out of the low ports by restoring
+the Windows default dynamic port range (`49152`–`65535`). In an **elevated** PowerShell:
+
+```powershell
+net stop winnat
+netsh int ipv4 set dynamicport tcp start=49152 num=16384
+net start winnat
+```
+
+Reboot, then confirm the API is up:
+
+```powershell
+curl.exe http://127.0.0.1:8978/v1/status
+```
+
+**Do not** try to fix this with `netsh int ipv4 add excludedportrange` on TypeWhisper's
+port. That reserves the port for you, but HTTP.sys still refuses it for exactly the same
+reason, so the error is unchanged.
+
+> Stopping WinNAT briefly drops WSL2/Docker networking — restart those containers and
+> distros afterwards.
+
+Prefer the fix above and keep TypeWhisper on its default port — it addresses the cause
+rather than working around it, and the dynamic port range setting persists across reboots.
+As a last resort (e.g. you can't run elevated), you can instead move TypeWhisper's port
+(Settings > Advanced > API Server) to one outside every excluded range; Whisper Trigger
+reads the port from the discovery file, so it follows the change automatically. The
+downside is a non-default port to remember on every machine and reinstall.
+
 ## Developing
 
 Build and run locally (Windows, [.NET 10 SDK](https://dotnet.microsoft.com/download)):

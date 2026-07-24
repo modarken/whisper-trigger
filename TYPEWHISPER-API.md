@@ -46,6 +46,11 @@ On startup the app writes a discovery file. Read this instead of assuming `8978`
 
 If the file is absent, the API server is not enabled (or the app isn't running).
 
+> **Gotcha:** the server is `HttpListener`/HTTP.sys-based, so it fails to start if its port
+> falls inside a Windows excluded TCP port range (WinNAT reserves blocks for Hyper-V/WSL2/
+> Docker). It reports this as "used by another process" even though nothing is listening.
+> See [Troubleshooting](README.md#typewhisper-says-api-server-enabled-but-not-running).
+
 ### Authentication
 
 - **Off by default** for local compatibility — no header needed.
