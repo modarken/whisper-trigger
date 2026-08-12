@@ -205,7 +205,9 @@ sealed class TrayApp : ApplicationContext
     // synchronously so focus is settled before the worker stops dictation.
     private void OnContextChanged(object? sender, EventArgs e)
     {
-        if (!_recording) return;
+        // Defensive: with the guard disabled we never arm it, so this shouldn't fire —
+        // but a setting flipped mid-recording could race an already-queued debounce.
+        if (!_recording || !_settings.GuardFocusChanges) return;
         bool restored = false;
         _sync.Send(_ => {
             restored = _guard.RestoreTarget();
@@ -224,7 +226,9 @@ sealed class TrayApp : ApplicationContext
         if (_client.Start())
         {
             _recording = true;
-            _guard.CaptureTarget();
+            // Leaving the guard disarmed is what disables the feature: no target is
+            // captured, so no focus change can cut the recording short.
+            if (_settings.GuardFocusChanges) _guard.CaptureTarget();
             _sync.Post(_ => ApplyState(true), null);
             _recordingTimeout?.Dispose();
             _recordingTimeout = new System.Threading.Timer(
@@ -390,6 +394,7 @@ sealed class TrayApp : ApplicationContext
         _settings.PttButton       = r.PttButton;
         _settings.AutoStopMinutes = r.AutoStopMinutes;
         _settings.AutoUpdate      = r.AutoUpdate;
+        _settings.GuardFocusChanges = r.GuardFocusChanges;
         _settings.Save();
 
         // Apply immediately — no restart needed.

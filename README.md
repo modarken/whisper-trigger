@@ -77,6 +77,7 @@ Right-click the tray icon → **Settings…** to:
 
 - Remap which side button is **toggle** vs **push-to-talk** (or disable one)
 - Change the **auto-stop timeout** (1–60 minutes)
+- Turn **Stop recording if focus leaves the target window** on or off (on by default)
 - Turn on **Automatically install updates**
 
 Settings are saved to `%APPDATA%\WhisperTrigger\settings.json`.
@@ -95,9 +96,15 @@ The app self-updates from GitHub Releases:
   redirection can leave the dictated text on the clipboard; that's an RDP limitation.)
 - Recording auto-stops after the configured timeout (default 5 minutes) if you forget to
   release/toggle.
-- If focus leaves your target window mid-dictation, Whisper Trigger returns to it before
-  pasting; if that window is gone, the text is captured in a safe pop-up instead of landing
-  in a random app.
+- **Focus guard** (on by default): if focus leaves your target window mid-dictation,
+  Whisper Trigger stops recording early, returns to the original window, and pastes there;
+  if that window is gone, the text is captured in a safe pop-up instead of landing in a
+  random app. The early stop is the point — it keeps the transcription from going somewhere
+  you didn't intend.
+  - The trade-off is that anything which briefly steals focus (a toast, an installer, a
+    misbehaving app) cuts your dictation short. If recordings keep ending mid-sentence,
+    turn the guard off in Settings; recording then runs uninterrupted and the text pastes
+    into whatever window has focus when you stop.
 - Whisper Trigger only *detects and reports* TypeWhisper's state — it never starts,
   installs, or manages TypeWhisper itself.
 - Only one instance runs at a time; launching a second copy exits immediately.

@@ -5,8 +5,8 @@ using System.Windows.Forms;
 namespace WhisperTrigger;
 
 // Dark settings dialog: remap which side button does toggle vs push-to-talk, set the
-// auto-stop timeout, and toggle automatic updates. Edits a copy of Settings and exposes
-// it via Result; the caller persists and applies on DialogResult.OK.
+// auto-stop timeout, toggle the focus guard, and toggle automatic updates. Edits a copy
+// of Settings and exposes it via Result; the caller persists and applies on DialogResult.OK.
 sealed class SettingsDialog : Form
 {
     private static readonly Color Bg     = Color.FromArgb(32, 32, 32);
@@ -18,6 +18,7 @@ sealed class SettingsDialog : Form
     private readonly ComboBox _toggle;
     private readonly ComboBox _ptt;
     private readonly NumericUpDown _autoStop;
+    private readonly CheckBox _guardFocus;
     private readonly CheckBox _autoUpdate;
 
     public Settings Result { get; }
@@ -42,6 +43,7 @@ sealed class SettingsDialog : Form
             PttButton       = current.PttButton,
             AutoStopMinutes = current.AutoStopMinutes,
             AutoUpdate      = current.AutoUpdate,
+            GuardFocusChanges = current.GuardFocusChanges,
         };
 
         Text            = "Whisper Trigger — Settings";
@@ -53,7 +55,7 @@ sealed class SettingsDialog : Form
         BackColor       = Bg;
         ForeColor       = Fg;
         Font            = new Font("Segoe UI", 9.5f);
-        ClientSize      = new Size(380, 250);
+        ClientSize      = new Size(420, 320);
         Padding         = new Padding(18);
 
         _toggle = MakeCombo(current.ToggleButton);
@@ -70,6 +72,23 @@ sealed class SettingsDialog : Form
             BorderStyle = BorderStyle.FixedSingle,
         };
 
+        _guardFocus = new CheckBox
+        {
+            Text      = "Stop recording if focus leaves the target window",
+            Checked   = current.GuardFocusChanges,
+            ForeColor = Fg,
+            AutoSize  = true,
+        };
+
+        var guardHint = new Label
+        {
+            Text        = "Keeps the transcription out of whatever app stole focus. "
+                        + "Turn off if recording keeps cutting out on you.",
+            ForeColor   = SubFg,
+            AutoSize    = true,
+            MaximumSize = new Size(360, 0),
+        };
+
         _autoUpdate = new CheckBox
         {
             Text      = "Install updates automatically on launch",
@@ -83,7 +102,13 @@ sealed class SettingsDialog : Form
         AddRow("Push-to-talk button", _ptt, ref y);
         AddRow("Auto-stop after (minutes)", _autoStop, ref y);
 
-        _autoUpdate.Location = new Point(20, y + 6);
+        _guardFocus.Location = new Point(20, y + 6);
+        Controls.Add(_guardFocus);
+
+        guardHint.Location = new Point(38, y + 30);
+        Controls.Add(guardHint);
+
+        _autoUpdate.Location = new Point(20, y + 76);
         Controls.Add(_autoUpdate);
 
         var save = new Button
@@ -95,7 +120,7 @@ sealed class SettingsDialog : Form
             ForeColor    = Color.White,
             AutoSize     = true,
             Padding      = new Padding(14, 4, 14, 4),
-            Location     = new Point(278, 196),
+            Location     = new Point(318, 266),
         };
         save.FlatAppearance.BorderSize = 0;
         save.Click += OnSave;
@@ -109,7 +134,7 @@ sealed class SettingsDialog : Form
             ForeColor    = Fg,
             AutoSize     = true,
             Padding      = new Padding(10, 4, 10, 4),
-            Location     = new Point(196, 196),
+            Location     = new Point(236, 266),
         };
         cancel.FlatAppearance.BorderSize = 0;
 
@@ -169,6 +194,7 @@ sealed class SettingsDialog : Form
         Result.PttButton       = ptt;
         Result.AutoStopMinutes = (int)_autoStop.Value;
         Result.AutoUpdate      = _autoUpdate.Checked;
+        Result.GuardFocusChanges = _guardFocus.Checked;
     }
 
     protected override void OnHandleCreated(EventArgs e)

@@ -16,6 +16,12 @@ sealed class Settings
     public int  AutoStopMinutes { get; set; } = 5;
     public bool AutoUpdate      { get; set; } = false; // install updates automatically on launch
 
+    // Watch for focus leaving the target window mid-recording and, when it does, restore
+    // that window (or the sink) and stop dictation early so the paste can't land in a
+    // random app. Off means recording runs uninterrupted and the text pastes wherever
+    // focus happens to be at stop time.
+    public bool GuardFocusChanges { get; set; } = true;
+
     private static readonly JsonSerializerOptions JsonOpts = new()
     {
         WriteIndented = true,
