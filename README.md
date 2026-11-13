@@ -152,7 +152,7 @@ netsh int ipv4 set dynamicport tcp start=49152 num=16384
 net start winnat
 ```
 
-Reboot, then confirm the API is up:
+Reboot, then confirm the API is up (substitute your port if you've changed it):
 
 ```powershell
 curl.exe http://127.0.0.1:8978/v1/status
@@ -165,16 +165,16 @@ reason, so the error is unchanged.
 > Stopping WinNAT briefly drops WSL2/Docker networking — restart those containers and
 > distros afterwards.
 
-Prefer the fix above and keep TypeWhisper on its default port — it addresses the cause
-rather than working around it, and the dynamic port range setting persists across reboots.
-As a last resort (e.g. you can't run elevated), you can instead move TypeWhisper's port
-(Settings > Advanced > API Server) to one outside every excluded range; Whisper Trigger
-reads the port from the discovery file, so it follows the change automatically. The
-downside is a non-default port to remember on every machine and reinstall.
+**Or move the port.** Even with the default dynamic range, `8978` can still end up
+excluded (a single-port reservation on `8978` has been seen with no `*` marker, i.e. not
+added by hand). The simplest dodge is to move TypeWhisper's port (Settings > Advanced >
+API Server) to one well below `49152` and outside every listed range — `18978` is a good
+choice. Whisper Trigger reads the port from TypeWhisper's discovery file, so it follows
+the change automatically; no Whisper Trigger setting needed.
 
 ## Developing
 
-Build and run locally (Windows, [.NET 10 SDK](https://dotnet.microsoft.com/download)):
+Build and run locally (Windows, [.NET 11 SDK](https://dotnet.microsoft.com/download)):
 
 ```bash
 dotnet run --project src/WhisperTrigger

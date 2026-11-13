@@ -88,15 +88,19 @@ sealed class TypeWhisperClient : IDisposable
         return null;
     }
 
+    // TypeWhisper writes the discovery file under TypeWhisper-UserData; older builds used TypeWhisper.
+    private static readonly string[] DiscoveryDirs = { "TypeWhisper-UserData", "TypeWhisper" };
+
     // Re-reads the discovery file on every call so changes take effect without restarting.
     private (string url, string? token) Discover()
     {
         try
         {
-            string path = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "TypeWhisper", "api-discovery.json");
-            if (File.Exists(path))
+            string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            string? path = DiscoveryDirs
+                .Select(d => Path.Combine(localAppData, d, "api-discovery.json"))
+                .FirstOrDefault(File.Exists);
+            if (path != null)
             {
                 using var doc = JsonDocument.Parse(File.ReadAllText(path));
                 var root = doc.RootElement;
