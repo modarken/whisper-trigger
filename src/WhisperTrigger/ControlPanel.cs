@@ -46,7 +46,7 @@ sealed class ControlPanel : Form
     private static readonly Color Accent  = Color.FromArgb(210, 40, 40);
     private static readonly Color BtnBg   = Color.FromArgb(60, 60, 60);
 
-    private const int W = 640, H = 516, ColW = 296, LeftX = 16, RightX = 328;
+    private const int W = 640, H = 532, ColW = 296, LeftX = 16, RightX = 328;
 
     private readonly IPanelHost _host;
     private readonly float _scale;
@@ -55,7 +55,8 @@ sealed class ControlPanel : Form
 
     private Color _dot = Color.Gray;
     private readonly Label _status, _twStatus, _hint, _version;
-    private readonly Button _dictate, _wake, _sleep, _restart, _quitTw;
+    private readonly Button _dictate;
+    private readonly IconButton _wake, _sleep, _restart, _quitTw;
     private readonly ToggleSwitch _buttonsOn, _startAtLogin, _autoUpdate, _guardFocus, _autoSleep, _sleepOnLock;
     private readonly ComboBox _toggleBtn, _pttBtn, _pressWhenAsleep;
     private readonly NumericUpDown _autoStop, _sleepModel, _quitApp;
@@ -117,20 +118,26 @@ sealed class ControlPanel : Form
         _hint = Add(new Label { ForeColor = SubFg, BackColor = CardBg, AutoSize = true }, LeftX + 12, y + 60);
 
         y = 176;
-        Card(LeftX, y, 96);
+        Card(LeftX, y, 112);
         Header("TYPEWHISPER", LeftX, y);
         _twStatus = Add(new Label { BackColor = CardBg, AutoSize = true }, LeftX + 12, y + 30);
         int bw = (ColW - 24 - 18) / 4;
-        _wake    = Add(MakeButton("Wake",    BtnBg), LeftX + 12,                y + 56, bw, 30);
-        _sleep   = Add(MakeButton("Sleep",   BtnBg), LeftX + 12 + (bw + 6),     y + 56, bw, 30);
-        _restart = Add(MakeButton("Restart", BtnBg), LeftX + 12 + (bw + 6) * 2, y + 56, bw, 30);
-        _quitTw  = Add(MakeButton("Quit",    BtnBg), LeftX + 12 + (bw + 6) * 3, y + 56, bw, 30);
+        // Media-style controls: icon + word, coloured so they read at a glance.
+        _wake    = Add(MakeIconButton("Wake",    IconKind.Play,    Color.FromArgb(80, 200, 120)),  LeftX + 12,                y + 56, bw, 46);
+        _sleep   = Add(MakeIconButton("Sleep",   IconKind.Pause,   Color.FromArgb(120, 160, 230)), LeftX + 12 + (bw + 6),     y + 56, bw, 46);
+        _restart = Add(MakeIconButton("Restart", IconKind.Restart, Fg),                            LeftX + 12 + (bw + 6) * 2, y + 56, bw, 46);
+        _quitTw  = Add(MakeIconButton("Stop",    IconKind.Stop,    Color.FromArgb(235, 80, 80)),   LeftX + 12 + (bw + 6) * 3, y + 56, bw, 46);
+        var tips = new ToolTip { InitialDelay = 400 };
+        tips.SetToolTip(_wake,    "Load the speech model (starts TypeWhisper if it isn't running)");
+        tips.SetToolTip(_sleep,   "Unload the speech model to free ~1 GB — TypeWhisper keeps running");
+        tips.SetToolTip(_restart, "Close TypeWhisper and start it fresh");
+        tips.SetToolTip(_quitTw,  "Stop TypeWhisper completely — your next press starts it again");
         _wake.Click    += (_, _) => _host.Command(PanelCommand.Wake);
         _sleep.Click   += (_, _) => _host.Command(PanelCommand.Sleep);
         _restart.Click += (_, _) => _host.Command(PanelCommand.Restart);
         _quitTw.Click  += (_, _) => _host.Command(PanelCommand.QuitTw);
 
-        y = 284;
+        y = 300;
         Card(LeftX, y, 176);
         Header("GENERAL", LeftX, y);
         _buttonsOn    = SwitchRow("Mouse buttons trigger dictation", LeftX, y + 32);
@@ -147,18 +154,18 @@ sealed class ControlPanel : Form
         _autoStop  = NumberRow("Auto-stop after (min)", 1, 60, RightX, y + 98);
 
         y = 234;
-        Card(RightX, y, 226);
+        Card(RightX, y, 242);
         Header("IDLE SLEEP", RightX, y);
         _autoSleep       = SwitchRow("Sleep TypeWhisper when idle", RightX, y + 32);
         _sleepOnLock     = SwitchRow("Unload as soon as the PC locks", RightX, y + 66);
         _sleepModel      = NumberRow("Unload model after (min)", 0, 1440, RightX, y + 98);
-        _quitApp         = NumberRow("Quit TypeWhisper after (min)", 0, 1440, RightX, y + 130);
+        _quitApp         = NumberRow("Stop TypeWhisper after (min)", 0, 1440, RightX, y + 130);
         _pressWhenAsleep = ComboRow("A press while asleep", WakeChoices, RightX, y + 162);
         Add(new Label
         {
             Text = "0 = never. Unloading frees ~1 GB (wakes in ~3 s).",
             ForeColor = SubFg, BackColor = CardBg, AutoSize = true,
-        }, RightX + 12, y + 200);
+        }, RightX + 12, y + 208);
 
         // ---- Footer ----
         int fx = LeftX;
@@ -172,12 +179,12 @@ sealed class ControlPanel : Form
         {
             var link = MakeLink(text);
             link.Click += (_, _) => _host.Command(cmd);
-            Add(link, fx, 476);
+            Add(link, fx, 492);
             fx += (int)(TextRenderer.MeasureText(text, link.Font).Width / _scale) + 18;
         }
         var exit = MakeLink("Exit");
         exit.Click += (_, _) => _host.Command(PanelCommand.Exit);
-        Add(exit, W - 16 - (int)(TextRenderer.MeasureText("Exit", exit.Font).Width / _scale), 476);
+        Add(exit, W - 16 - (int)(TextRenderer.MeasureText("Exit", exit.Font).Width / _scale), 492);
 
         // ---- Settings wiring: every change applies at once ----
         _buttonsOn.CheckedChanged    += (_, _) => { if (!_syncing) _host.ButtonsEnabled = _buttonsOn.Checked; };
@@ -372,6 +379,9 @@ sealed class ControlPanel : Form
         return n;
     }
 
+    private static IconButton MakeIconButton(string text, IconKind icon, Color iconColor) =>
+        new() { Text = text, Icon = icon, IconColor = iconColor, BackColor = BtnBg, ForeColor = Fg, SurfaceColor = CardBg };
+
     private static Button MakeButton(string text, Color bg)
     {
         var b = new FlatButton
@@ -497,6 +507,112 @@ sealed class FlatButton : Button
 {
     public FlatButton() => SetStyle(ControlStyles.Selectable, false);
     protected override bool ShowFocusCues => false;
+}
+
+enum IconKind { Play, Pause, Stop, Restart }
+
+// A media-style button: a crisp, hand-drawn icon above a word. Never takes focus (see
+// FlatButton). Greys out icon and text when disabled.
+sealed class IconButton : Control
+{
+    private bool _hover, _down;
+
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)] 
+    public IconKind Icon { get; set; }
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)] 
+    public Color IconColor { get; set; } = Color.White;
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)] 
+    public Color SurfaceColor { get; set; } = Color.Black;
+
+    public IconButton()
+    {
+        SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer |
+                 ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
+        SetStyle(ControlStyles.Selectable, false);
+        Cursor = Cursors.Hand;
+    }
+
+    protected override void OnMouseEnter(EventArgs e) { _hover = true;  Invalidate(); base.OnMouseEnter(e); }
+    protected override void OnMouseLeave(EventArgs e) { _hover = _down = false; Invalidate(); base.OnMouseLeave(e); }
+    protected override void OnMouseDown(MouseEventArgs e) { if (e.Button == MouseButtons.Left) { _down = true; Invalidate(); } base.OnMouseDown(e); }
+    protected override void OnMouseUp(MouseEventArgs e)   { _down = false; Invalidate(); base.OnMouseUp(e); }
+    protected override void OnEnabledChanged(EventArgs e) { _hover = _down = false; Invalidate(); base.OnEnabledChanged(e); }
+    protected override void OnTextChanged(EventArgs e)    { Invalidate(); base.OnTextChanged(e); }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var g = e.Graphics;
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        g.Clear(SurfaceColor); // what's behind the rounded corners
+
+        Color bg = !Enabled ? Color.FromArgb(50, 50, 50)
+                 : _down    ? ControlPaint.Dark(BackColor, 0.1f)
+                 : _hover   ? ControlPaint.Light(BackColor, 0.25f)
+                 :            BackColor;
+        float r = Height / 8f;
+        using (var path = new GraphicsPath())
+        {
+            var rc = new RectangleF(0, 0, Width - 1, Height - 1);
+            path.AddArc(rc.X, rc.Y, r * 2, r * 2, 180, 90);
+            path.AddArc(rc.Right - r * 2, rc.Y, r * 2, r * 2, 270, 90);
+            path.AddArc(rc.Right - r * 2, rc.Bottom - r * 2, r * 2, r * 2, 0, 90);
+            path.AddArc(rc.X, rc.Bottom - r * 2, r * 2, r * 2, 90, 90);
+            path.CloseFigure();
+            using var b = new SolidBrush(bg);
+            g.FillPath(b, path);
+        }
+
+        // Icon in the upper part, word below.
+        float s  = Height * 0.30f;               // icon box size
+        float cx = Width / 2f, cy = Height * 0.36f;
+        var box  = new RectangleF(cx - s / 2, cy - s / 2, s, s);
+        Color ic = Enabled ? IconColor : Color.FromArgb(105, 105, 105);
+        using (var brush = new SolidBrush(ic))
+        {
+            switch (Icon)
+            {
+                case IconKind.Play:
+                    g.FillPolygon(brush, new[]
+                    {
+                        new PointF(box.Left + s * 0.12f, box.Top),
+                        new PointF(box.Right,            cy),
+                        new PointF(box.Left + s * 0.12f, box.Bottom),
+                    });
+                    break;
+                case IconKind.Pause:
+                    float bw = s * 0.32f;
+                    g.FillRectangle(brush, box.Left + s * 0.06f, box.Top, bw, s);
+                    g.FillRectangle(brush, box.Right - s * 0.06f - bw, box.Top, bw, s);
+                    break;
+                case IconKind.Stop:
+                    var sq = RectangleF.Inflate(box, -s * 0.06f, -s * 0.06f);
+                    g.FillRectangle(brush, sq);
+                    break;
+                case IconKind.Restart:
+                    float pw = Math.Max(1.5f, s * 0.15f);
+                    using (var pen = new Pen(ic, pw))
+                        g.DrawArc(pen, RectangleF.Inflate(box, -pw / 2, -pw / 2), 30, 290);
+                    // Arrowhead at the arc's end (320°), pointing along the clockwise direction.
+                    double a = 320 * Math.PI / 180;
+                    float rr = s / 2 - pw / 2;
+                    var end = new PointF(cx + rr * (float)Math.Cos(a), cy + rr * (float)Math.Sin(a));
+                    var tan = new PointF(-(float)Math.Sin(a), (float)Math.Cos(a)); // clockwise tangent
+                    var nrm = new PointF((float)Math.Cos(a), (float)Math.Sin(a));
+                    float h = s * 0.32f;
+                    g.FillPolygon(brush, new[]
+                    {
+                        new PointF(end.X + tan.X * h,       end.Y + tan.Y * h),
+                        new PointF(end.X + nrm.X * h * 0.8f, end.Y + nrm.Y * h * 0.8f),
+                        new PointF(end.X - nrm.X * h * 0.8f, end.Y - nrm.Y * h * 0.8f),
+                    });
+                    break;
+            }
+        }
+
+        var textRect = new Rectangle(0, (int)(Height * 0.58f), Width, (int)(Height * 0.36f));
+        TextRenderer.DrawText(g, Text, Font, textRect, Enabled ? ForeColor : Color.FromArgb(120, 120, 120), bg,
+            TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+    }
 }
 
 // A Windows 11-style on/off switch.

@@ -81,7 +81,7 @@ button press:
 
 1. **Unload the model** after a short idle (default 15 min). Frees ~1 GB; TypeWhisper keeps
    running and reloads the model in ~3 s.
-2. **Quit TypeWhisper** after a long idle (default 60 min). Frees everything; Whisper
+2. **Stop TypeWhisper** after a long idle (default 60 min). Frees everything; Whisper
    Trigger relaunches it minimized in ~5 s.
 
 With idle sleep on, locking the PC also unloads the model right away (can be turned off).
@@ -91,8 +91,8 @@ only records if you're still holding the button once it's ready), **wake only**,
 first**.
 
 TypeWhisper is never closed while it's recording or transcribing, or while its own window is
-open. The control panel's **TypeWhisper** card wakes it, unloads the model, restarts it, or quits
-it on demand. Turn the whole thing on in the control panel (off by default).
+open. The control panel's **TypeWhisper** card has media-style buttons: **▶ Wake**, **⏸ Sleep** (unload the model),
+**⟳ Restart**, and **■ Stop** (close TypeWhisper completely) — hover one for what it does. Turn the whole thing on in the control panel (off by default).
 
 Only TypeWhisper's running state changes — your selected model and its settings are untouched.
 
@@ -121,7 +121,7 @@ and reconnect, and a watchdog re-arms it if the pointer moves while the hook hea
 
 **Left-click the tray icon** to open the control panel (or launch Whisper Trigger again from the
 Start menu while it's running). It shows the current status, a **Start/Stop dictation** button,
-the TypeWhisper card (status plus **Wake / Sleep / Restart / Quit**), and every setting —
+the TypeWhisper card (status plus **Wake / Sleep / Restart / Stop**), and every setting —
 changes apply immediately, no Save button. Click anywhere else, press Esc, or click the tray
 icon again to close it. Right-click the tray icon for a short menu (open, start/stop, exit).
 

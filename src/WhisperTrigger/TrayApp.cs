@@ -509,7 +509,7 @@ sealed class TrayApp : ApplicationContext, IPanelHost
         Log.Write($"TypeWhisper quit ({(manual ? "manual" : "idle")})");
         _sync.Post(_ => {
             ApplyState(_recording);
-            if (manual) Notify("TypeWhisper closed — your next press starts it again.");
+            if (manual) Notify("TypeWhisper stopped — your next press starts it again.");
         }, null);
     }
 
@@ -806,7 +806,7 @@ sealed class TrayApp : ApplicationContext, IPanelHost
         string offline = !_twInstalled ? "TypeWhisper not installed"
                        : _twRunning    ? "TypeWhisper not responding"
                        :                 "TypeWhisper not running";
-        string sleepText = sleep == SleepState.Off ? "TypeWhisper off (sleeping)" : "TypeWhisper asleep";
+        string sleepText = sleep == SleepState.Off ? "TypeWhisper stopped (sleeping)" : "TypeWhisper asleep";
         string busy  = _starting ? "Starting dictation..." : "Waking TypeWhisper...";
         string state = !enabled ? "Disabled" : recording ? "Recording..." : waking ? busy
                      : asleep ? sleepText : apiDown ? offline : "Ready";
@@ -816,7 +816,7 @@ sealed class TrayApp : ApplicationContext, IPanelHost
         // TypeWhisper's own state for the panel, independent of whether buttons are on.
         bool twDown = _apiKnown && !_apiReachable;
         string twStatus = waking                     ? (_starting ? "Starting dictation…" : "Waking…")
-                        : sleep == SleepState.Off    ? "Off — closed to save memory"
+                        : sleep == SleepState.Off    ? "Stopped — closed to save memory"
                         : asleep                     ? "Asleep — model unloaded to save memory"
                         : !_twInstalled && twDown    ? "Not installed"
                         : twDown                     ? (_twRunning ? "Not responding" : "Not running")
