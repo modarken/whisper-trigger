@@ -8,7 +8,7 @@ using Velopack;
 
 namespace WhisperTrigger;
 
-sealed class TrayApp : ApplicationContext
+sealed class TrayApp : ApplicationContext, IPanelHost
 {
     private enum Cmd
     {
@@ -45,13 +45,9 @@ sealed class TrayApp : ApplicationContext
     private long _recordingSince;    // worker-thread only: when the current recording began
     private int _syncMisses;         // worker-thread only: consecutive "TypeWhisper isn't recording"
     private System.Threading.Timer? _syncTimer; // worker-thread only: polls state while recording
-    private readonly ToolStripMenuItem _twRestartItem;
     private volatile bool _pttHeld;  // push-to-talk physically held right now
     private long _lastActivityTicks = Environment.TickCount64; // last dictation activity
     private readonly TypeWhisperApp _twApp = new();
-    private readonly ToolStripMenuItem _twWakeItem;
-    private readonly ToolStripMenuItem _twSleepItem;
-    private readonly ToolStripMenuItem _twQuitItem;
     private readonly SynchronizationContext _sync;
     private readonly TypeWhisperClient _client;
     private readonly MouseHook _hook;
@@ -61,12 +57,12 @@ sealed class TrayApp : ApplicationContext
     private readonly Updater _updater = new();
     private readonly Settings _settings;
     private readonly NotifyIcon _tray;
-    private readonly ToolStripMenuItem _statusItem;
-    private readonly ToolStripMenuItem _settingsItem;
-    private readonly ToolStripMenuItem _startAtLoginItem;
-    private readonly ToolStripMenuItem _checkUpdatesItem;
-    private readonly ToolStripMenuItem _enabledItem;
-    private readonly ToolStripMenuItem _toggleItem;
+    private readonly ToolStripMenuItem _toggleItem; // right-click menu: Start/Stop dictation
+    private readonly ControlPanel _panel;            // left-click flyout
+    private PanelState? _panelState;                 // UI thread: latest state for the panel
+    private readonly EventWaitHandle _showPanelEvent; // set by a second launch: open the panel
+    private readonly RegisteredWaitHandle _showPanelWait;
+    public const string ShowPanelEventName = "WhisperTrigger_ShowPanel";
     private Icon _icon;
     private volatile bool _recording; // written on worker thread, read on both
     private System.Threading.Timer? _recordingTimeout; // worker-thread only
@@ -94,38 +90,17 @@ sealed class TrayApp : ApplicationContext
         _twInstalled = _twApp.IsInstalled;
         Log.Write($"app started v{CurrentVersion()} (TypeWhisper {(_twApp.CanLaunch ? "launchable" : _twInstalled ? "installed, not launchable" : "not found")})");
 
-        // Context menu
-        _statusItem  = new ToolStripMenuItem("● Idle") { Enabled = false };
-        _enabledItem = new ToolStripMenuItem("Enable mouse buttons", null, OnToggleEnabled)
-            { Checked = _settings.ButtonsEnabled };
-
-        _twWakeItem  = new ToolStripMenuItem("Wake TypeWhisper", null, (_, _) => Enqueue(Cmd.Wake));
-        _twSleepItem = new ToolStripMenuItem("Sleep (unload model)", null, (_, _) => Enqueue(Cmd.SleepModel));
-        _twQuitItem  = new ToolStripMenuItem("Quit TypeWhisper", null, (_, _) => Enqueue(Cmd.QuitTw));
-        _twRestartItem = new ToolStripMenuItem("Restart TypeWhisper", null, (_, _) => Enqueue(Cmd.RestartTw));
-        var twMenu = new ToolStripMenuItem("TypeWhisper");
-        twMenu.DropDownItems.AddRange(new ToolStripItem[] { _twWakeItem, _twSleepItem, _twRestartItem, _twQuitItem });
-        _settingsItem = new ToolStripMenuItem("Settings…", null, OnOpenSettings);
-        _startAtLoginItem = new ToolStripMenuItem("Start at login", null, OnToggleStartAtLogin)
-            { Checked = IsStartAtLoginEnabled() };
-        _checkUpdatesItem = new ToolStripMenuItem("Check for updates", null, OnCheckForUpdates);
-
+        // Left-click opens the control panel (everything lives there); right-click keeps a
+        // short menu for the basics.
+        _panel = new ControlPanel(this);
+        _showPanelEvent = new EventWaitHandle(false, EventResetMode.AutoReset, ShowPanelEventName);
+        _showPanelWait  = ThreadPool.RegisterWaitForSingleObject(_showPanelEvent,
+            (_, _) => _sync.Post(_ => ShowPanel(nearCursor: false), null), null, Timeout.Infinite, executeOnlyOnce: false);
         var menu = new ContextMenuStrip();
-        menu.Items.Add(_statusItem);
-        menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add(_enabledItem);
-        _toggleItem = new ToolStripMenuItem("Toggle dictation", null,
-            (_, _) => Enqueue(Cmd.Toggle));
+        menu.Items.Add(new ToolStripMenuItem("Open Whisper Trigger", null, (_, _) => ShowPanel(nearCursor: true))
+            { Font = new Font(menu.Font, FontStyle.Bold) });
+        _toggleItem = new ToolStripMenuItem("Start dictation", null, (_, _) => Enqueue(Cmd.Toggle));
         menu.Items.Add(_toggleItem);
-        menu.Items.Add(new ToolStripMenuItem("Reset (re-arm buttons)", null, OnReset));
-        menu.Items.Add(twMenu);
-        menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add(_settingsItem);
-        menu.Items.Add(_startAtLoginItem);
-        menu.Items.Add(_checkUpdatesItem);
-        menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add(new ToolStripMenuItem("About", null, OnAbout));
-        menu.Items.Add(new ToolStripMenuItem("Open logs folder", null, (_, _) => Log.OpenFolder()));
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(new ToolStripMenuItem("Exit", null, (_, _) => ExitThread()));
 
@@ -138,7 +113,7 @@ sealed class TrayApp : ApplicationContext
             ContextMenuStrip = menu,
             Visible          = true,
         };
-        _tray.DoubleClick += (_, _) => Enqueue(Cmd.Toggle);
+        _tray.MouseClick += (_, e) => { if (e.Button == MouseButtons.Left) TogglePanel(); };
         _tray.BalloonTipClicked += OnBalloonClicked; // click an "update ready" toast to install
 
         // Mouse hook — events fire on the message-pump thread; just enqueue
@@ -835,15 +810,36 @@ sealed class TrayApp : ApplicationContext
         string busy  = _starting ? "Starting dictation..." : "Waking TypeWhisper...";
         string state = !enabled ? "Disabled" : recording ? "Recording..." : waking ? busy
                      : asleep ? sleepText : apiDown ? offline : "Ready";
-        _tray.Text          = $"Whisper Trigger — {state}"; // NotifyIcon.Text max 127 chars
-        _statusItem.Text    = !enabled ? "○ Disabled" : recording ? "● Recording..." : waking ? $"◌ {busy}"
-                            : asleep ? $"☾ {sleepText} — press to wake" : apiDown ? $"▲ {offline}" : "● Ready";
-        _toggleItem.Enabled = enabled;
+        _tray.Text       = $"Whisper Trigger — {state}"; // NotifyIcon.Text max 127 chars
+        _toggleItem.Text = recording ? "Stop dictation" : "Start dictation";
 
-        _twWakeItem.Enabled    = !waking && (asleep || apiDown) && (_twApp.CanLaunch || sleep == SleepState.ModelAsleep);
-        _twSleepItem.Enabled   = !waking && !recording && sleep == SleepState.Awake && _apiReachable;
-        _twRestartItem.Enabled = !waking && !recording && _twApp.CanLaunch;
-        _twQuitItem.Enabled    = !waking && !recording && sleep != SleepState.Off && _twApp.CanLaunch;
+        // TypeWhisper's own state for the panel, independent of whether buttons are on.
+        bool twDown = _apiKnown && !_apiReachable;
+        string twStatus = waking                     ? (_starting ? "Starting dictation…" : "Waking…")
+                        : sleep == SleepState.Off    ? "Off — closed to save memory"
+                        : asleep                     ? "Asleep — model unloaded to save memory"
+                        : !_twInstalled && twDown    ? "Not installed"
+                        : twDown                     ? (_twRunning ? "Not responding" : "Not running")
+                        : !_apiKnown                 ? "Checking…"
+                        :                              "Ready";
+        string headline = recording ? "Recording…"
+                        : waking    ? (_starting ? "Starting dictation…" : "Waking TypeWhisper…")
+                        : asleep    ? "TypeWhisper asleep — a press wakes it"
+                        : apiDown   ? offline
+                        : !enabled  ? "Mouse buttons are off"
+                        :             "Ready to dictate";
+        var green = Color.FromArgb(70, 185, 110);
+        _panelState = new PanelState(
+            Status:    headline,
+            Dot:       recording ? red : waking || apiDown ? amber : asleep ? slate : enabled ? green : gray,
+            Recording: recording,
+            Busy:      waking,
+            TwStatus:  twStatus,
+            CanWake:    !waking && (asleep || twDown) && (_twApp.CanLaunch || sleep == SleepState.ModelAsleep),
+            CanSleep:   !waking && !recording && sleep == SleepState.Awake && _apiReachable,
+            CanRestart: !waking && !recording && _twApp.CanLaunch,
+            CanQuit:    !waking && !recording && sleep != SleepState.Off && _twApp.CanLaunch);
+        if (_panel.Visible) _panel.UpdateState(_panelState);
 
         if (recording)      _overlay.ShowRecording();
         else if (_starting) _overlay.ShowBusy("STARTING");
@@ -862,72 +858,92 @@ sealed class TrayApp : ApplicationContext
         _tray.ShowBalloonTip(4000, "Whisper Trigger", msg, icon);
     }
 
-    // ---- Menu handlers ---------------------------------------------------------
+    // ---- Control panel (UI thread) ------------------------------------------------
 
-    private void OnToggleStartAtLogin(object? sender, EventArgs e)
+    private void ShowPanel(bool nearCursor)
     {
-        using var key = Registry.CurrentUser.OpenSubKey(RunKeyPath, writable: true);
-        if (key is null) return;
+        if (_panelState is null) ApplyState(_recording);
+        _panel.ShowPanel(_panelState!, nearCursor);
+    }
 
-        if (IsStartAtLoginEnabled())
+    // Left-click on the tray icon. That click first steals focus from an open panel (which
+    // hides it), so a click just after it hid means "close", not "open again".
+    private void TogglePanel()
+    {
+        if (_panel.Visible) _panel.HidePanel();
+        else if (Environment.TickCount64 - _panel.HiddenAtTicks > 400) ShowPanel(nearCursor: true);
+    }
+
+    Settings IPanelHost.Settings => _settings;
+    string IPanelHost.Version => CurrentVersion();
+
+    bool IPanelHost.StartAtLogin
+    {
+        get => IsStartAtLoginEnabled();
+        set
         {
-            key.DeleteValue(AppName, throwOnMissingValue: false);
-            _startAtLoginItem.Checked = false;
-        }
-        else
-        {
-            string? exe = Environment.ProcessPath;
-            if (exe is not null)
+            try
             {
-                key.SetValue(AppName, $"\"{exe}\"", RegistryValueKind.String); // explicit String kind required; update checkbox only after confirmed write
-                _startAtLoginItem.Checked = true;
+                using var key = Registry.CurrentUser.OpenSubKey(RunKeyPath, writable: true);
+                if (key is null) return;
+                if (!value) key.DeleteValue(AppName, throwOnMissingValue: false);
+                else if (Environment.ProcessPath is { } exe)
+                    key.SetValue(AppName, $"\"{exe}\"", RegistryValueKind.String); // explicit String kind required
             }
+            catch (Exception ex) { Notify($"Couldn't change Start at login: {ex.Message}", ToolTipIcon.Error); }
         }
     }
 
-    private void OnToggleEnabled(object? sender, EventArgs e)
+    bool IPanelHost.ButtonsEnabled
     {
-        _hook.Enabled = !_hook.Enabled;
-        _enabledItem.Checked = _hook.Enabled;
-        _settings.ButtonsEnabled = _hook.Enabled;
-        _settings.Save();
-        ApplyState(_recording);
+        get => _hook.Enabled;
+        set
+        {
+            _hook.Enabled = value;
+            _settings.ButtonsEnabled = value;
+            _settings.Save();
+            ApplyState(_recording);
+        }
     }
 
-    private void OnAbout(object? sender, EventArgs e)
+    // A setting was edited in the panel: persist it and apply it right away.
+    void IPanelHost.SettingsChanged()
     {
-        using var about = new AboutBox(CurrentVersion(), _icon, () => OnCheckForUpdates(this, EventArgs.Empty));
-        about.ShowDialog();
+        _settings.Save();
+        Touch(); // changing the idle timers shouldn't fire them on the very next beat
+        _hook.ToggleButton = _settings.ToggleButton;
+        _hook.PttButton    = _settings.PttButton;
+    }
+
+    void IPanelHost.Command(PanelCommand cmd)
+    {
+        switch (cmd)
+        {
+            case PanelCommand.ToggleDictation:
+                // Hide first so focus goes back to the app being dictated into, not the panel.
+                _panel.HidePanel();
+                Enqueue(Cmd.Toggle);
+                break;
+            case PanelCommand.Wake:         Enqueue(Cmd.Wake);       break;
+            case PanelCommand.Sleep:        Enqueue(Cmd.SleepModel); break;
+            case PanelCommand.Restart:      Enqueue(Cmd.RestartTw);  break;
+            case PanelCommand.QuitTw:       Enqueue(Cmd.QuitTw);     break;
+            case PanelCommand.ResetButtons: OnReset(this, EventArgs.Empty); break;
+            case PanelCommand.CheckUpdates: OnCheckForUpdates(this, EventArgs.Empty); break;
+            case PanelCommand.OpenLogs:     _panel.HidePanel(); Log.OpenFolder(); break;
+            case PanelCommand.About:
+                _panel.HidePanel();
+                using (var about = new AboutBox(CurrentVersion(), _icon, () => OnCheckForUpdates(this, EventArgs.Empty)))
+                    about.ShowDialog();
+                break;
+            case PanelCommand.Exit:         ExitThread(); break;
+        }
     }
 
     private static string CurrentVersion()
     {
         var v = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version;
         return v is null ? "unknown" : $"{v.Major}.{v.Minor}.{v.Build}";
-    }
-
-    private void OnOpenSettings(object? sender, EventArgs e)
-    {
-        using var dlg = new SettingsDialog(_settings);
-        if (dlg.ShowDialog() != DialogResult.OK) return;
-
-        var r = dlg.Result;
-        _settings.ToggleButton    = r.ToggleButton;
-        _settings.PttButton       = r.PttButton;
-        _settings.AutoStopMinutes = r.AutoStopMinutes;
-        _settings.AutoUpdate      = r.AutoUpdate;
-        _settings.GuardFocusChanges = r.GuardFocusChanges;
-        _settings.AutoSleep         = r.AutoSleep;
-        _settings.SleepModelMinutes = r.SleepModelMinutes;
-        _settings.QuitAppMinutes    = r.QuitAppMinutes;
-        _settings.PressWhenAsleep   = r.PressWhenAsleep;
-        _settings.SleepOnLock       = r.SleepOnLock;
-        _settings.Save();
-        Touch(); // changing the idle timers shouldn't fire them on the very next beat
-
-        // Apply immediately — no restart needed.
-        _hook.ToggleButton   = _settings.ToggleButton;
-        _hook.PttButton      = _settings.PttButton;
     }
 
     // ---- Updates ---------------------------------------------------------------
@@ -1073,6 +1089,9 @@ sealed class TrayApp : ApplicationContext
             _hook.Dispose();
             _guard.Dispose();
             _overlay.Dispose();
+            _showPanelWait.Unregister(null);
+            _showPanelEvent.Dispose();
+            _panel.Dispose();
             _sink.Dispose();
             _tray.Visible = false;
             _tray.Dispose();

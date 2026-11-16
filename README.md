@@ -53,8 +53,8 @@ tells you what to fix.
 | Back (XButton1) | **Push-to-talk** — hold to record, release to stop |
 | Forward (XButton2) | **Toggle** — press to start, press again to stop |
 
-Buttons are remappable — see [Settings](#settings). Double-clicking the tray icon also
-toggles dictation.
+Buttons are remappable — see [Control panel](#control-panel). The panel's **Start dictation**
+button also toggles dictation.
 
 ### Recording indicator
 
@@ -90,6 +90,12 @@ What a press does while it's asleep is configurable: **wake and start recording*
 only records if you're still holding the button once it's ready), **wake only**, or **ask
 first**.
 
+TypeWhisper is never closed while it's recording or transcribing, or while its own window is
+open. The control panel's **TypeWhisper** card wakes it, unloads the model, restarts it, or quits
+it on demand. Turn the whole thing on in the control panel (off by default).
+
+Only TypeWhisper's running state changes — your selected model and its settings are untouched.
+
 ### When TypeWhisper is in a bad state
 
 Every press checks TypeWhisper before recording. If it isn't running (closed or crashed),
@@ -97,7 +103,7 @@ isn't responding (hung), or has no model loaded, Whisper Trigger tells you what'
 fixes it — starting or restarting TypeWhisper — but **never starts recording off the back
 of a recovery**: you press again once it reports ready. (Only a sleep Whisper Trigger itself
 planned can go straight to recording.) The tray status distinguishes *not running* from
-*not responding*, and **TypeWhisper → Restart TypeWhisper** forces a fresh start.
+*not responding*, and **Restart** on the control panel's TypeWhisper card forces a fresh start.
 
 A slow start (e.g. the first dictation after a long idle) shows a **STARTING** badge instead
 of failing after 5 s. If a start or stop does fail, Whisper Trigger asks TypeWhisper whether
@@ -109,15 +115,17 @@ recording, the badge is re-checked every 2 s and clears if TypeWhisper stopped o
 Windows can silently drop the low-level mouse hook that catches the side buttons (around a
 lock/unlock or RDP reconnect). Whisper Trigger re-arms it automatically after every unlock
 and reconnect, and a watchdog re-arms it if the pointer moves while the hook hears nothing.
-**Reset** in the tray menu does the same on demand. Each re-arm is logged. TypeWhisper is never closed while it's recording or transcribing, or while its own
-window is open. The tray menu's **TypeWhisper** submenu wakes it, unloads the model, or quits it
-on demand. Turn the whole thing on in Settings (off by default).
+**Reset buttons** on the control panel does the same on demand. Each re-arm is logged.
 
-Only TypeWhisper's running state changes — your selected model and its settings are untouched.
+## Control panel
 
-## Settings
+**Left-click the tray icon** to open the control panel (or launch Whisper Trigger again from the
+Start menu while it's running). It shows the current status, a **Start/Stop dictation** button,
+the TypeWhisper card (status plus **Wake / Sleep / Restart / Quit**), and every setting —
+changes apply immediately, no Save button. Click anywhere else, press Esc, or click the tray
+icon again to close it. Right-click the tray icon for a short menu (open, start/stop, exit).
 
-Right-click the tray icon → **Settings…** to:
+From the panel you can:
 
 - Remap which side button is **toggle** vs **push-to-talk** (or disable one)
 - Change the **auto-stop timeout** (1–60 minutes)
@@ -125,8 +133,11 @@ Right-click the tray icon → **Settings…** to:
 - Turn on **Automatically install updates**
 - Turn on **TypeWhisper idle sleep**, set its two timers (0 skips a step), and choose what a
   press does while it's asleep
+- Turn **Mouse buttons trigger dictation** off (buttons pass through to other apps) and turn
+  **Start at login** on or off
+- Check for updates, reset the buttons, open the logs folder, or see About
 
-The **Enable mouse buttons** tray toggle is remembered across restarts.
+Every setting, including the mouse-buttons switch, is remembered across restarts.
 
 Settings are saved to `%APPDATA%\WhisperTrigger\settings.json`.
 
@@ -134,8 +145,8 @@ Settings are saved to `%APPDATA%\WhisperTrigger\settings.json`.
 
 The app self-updates from GitHub Releases:
 
-- **Check for updates** (tray menu) — checks now; when one is ready, click the toast to install.
-- **Automatically install updates** (Settings) — when on, updates are applied on launch.
+- **Check for updates** (control panel) — checks now; when one is ready, click the toast to install.
+- **Install updates automatically** (control panel) — when on, updates are applied on launch.
 
 ## Notes
 
@@ -151,7 +162,7 @@ The app self-updates from GitHub Releases:
   you didn't intend.
   - The trade-off is that anything which briefly steals focus (a toast, an installer, a
     misbehaving app) cuts your dictation short. If recordings keep ending mid-sentence,
-    turn the guard off in Settings; recording then runs uninterrupted and the text pastes
+    turn the guard off in the control panel; recording then runs uninterrupted and the text pastes
     into whatever window has focus when you stop.
 - Whisper Trigger only *detects and reports* TypeWhisper's state — it never starts,
   installs, or manages TypeWhisper itself.

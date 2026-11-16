@@ -15,11 +15,26 @@ static class Program
             .Run();
 
         using var mutex = new Mutex(true, "WhisperTrigger_SingleInstance", out bool isFirst);
-        if (!isFirst) return; // another instance is already running
+        if (!isFirst)
+        {
+            // Already running (e.g. launched again from the Start menu): open its panel.
+            // We were just started by the user, so we may hand it the right to come forward.
+            try
+            {
+                AllowSetForegroundWindow(-1); // ASFW_ANY
+                using var show = EventWaitHandle.OpenExisting(TrayApp.ShowPanelEventName);
+                show.Set();
+            }
+            catch { }
+            return;
+        }
 
         ApplicationConfiguration.Initialize();
         SynchronizationContext.SetSynchronizationContext(new WindowsFormsSynchronizationContext());
         using var app = new TrayApp();
         Application.Run(app);
     }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool AllowSetForegroundWindow(int dwProcessId);
 }
