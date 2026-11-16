@@ -20,6 +20,23 @@ sealed class SettingsDialog : Form
     private readonly NumericUpDown _autoStop;
     private readonly CheckBox _guardFocus;
     private readonly CheckBox _autoUpdate;
+    private readonly CheckBox _autoSleep;
+    private readonly CheckBox _sleepOnLock;
+    private readonly NumericUpDown _sleepModel;
+    private readonly NumericUpDown _quitApp;
+    private readonly ComboBox _pressWhenAsleep;
+
+    private sealed record WakeChoice(string Label, WakeAction Action)
+    {
+        public override string ToString() => Label;
+    }
+
+    private static WakeChoice[] WakeChoices =>
+    [
+        new("Wake and start recording", WakeAction.WakeAndRecord),
+        new("Wake only",                WakeAction.Wake),
+        new("Ask me first",             WakeAction.Ask),
+    ];
 
     public Settings Result { get; }
 
@@ -44,6 +61,12 @@ sealed class SettingsDialog : Form
             AutoStopMinutes = current.AutoStopMinutes,
             AutoUpdate      = current.AutoUpdate,
             GuardFocusChanges = current.GuardFocusChanges,
+            AutoSleep         = current.AutoSleep,
+            SleepModelMinutes = current.SleepModelMinutes,
+            QuitAppMinutes    = current.QuitAppMinutes,
+            PressWhenAsleep   = current.PressWhenAsleep,
+            SleepOnLock       = current.SleepOnLock,
+            ButtonsEnabled    = current.ButtonsEnabled,
         };
 
         Text            = "Whisper Trigger — Settings";
@@ -55,7 +78,7 @@ sealed class SettingsDialog : Form
         BackColor       = Bg;
         ForeColor       = Fg;
         Font            = new Font("Segoe UI", 9.5f);
-        ClientSize      = new Size(420, 320);
+        ClientSize      = new Size(420, 530);
         Padding         = new Padding(18);
 
         _toggle = MakeCombo(current.ToggleButton);
@@ -111,6 +134,74 @@ sealed class SettingsDialog : Form
         _autoUpdate.Location = new Point(20, y + 76);
         Controls.Add(_autoUpdate);
 
+        // ---- TypeWhisper idle sleep ----
+        y += 116;
+        var header = new Label
+        {
+            Text      = "TypeWhisper idle sleep",
+            Font      = new Font("Segoe UI Semibold", 10f),
+            ForeColor = Fg,
+            AutoSize  = true,
+            Location  = new Point(20, y),
+        };
+        Controls.Add(header);
+        y += 26;
+
+        _autoSleep = new CheckBox
+        {
+            Text      = "Put TypeWhisper to sleep when I'm not dictating",
+            Checked   = current.AutoSleep,
+            ForeColor = Fg,
+            AutoSize  = true,
+            Location  = new Point(20, y),
+        };
+        Controls.Add(_autoSleep);
+        y += 28;
+
+        _sleepOnLock = new CheckBox
+        {
+            Text      = "Also unload the model as soon as the PC locks",
+            Checked   = current.SleepOnLock,
+            ForeColor = Fg,
+            AutoSize  = true,
+            Location  = new Point(38, y),
+        };
+        Controls.Add(_sleepOnLock);
+        y += 32;
+
+        _sleepModel = MakeMinutes(current.SleepModelMinutes);
+        _quitApp    = MakeMinutes(current.QuitAppMinutes);
+        AddRow("Unload model after (min)", _sleepModel, ref y);
+        AddRow("Quit TypeWhisper after (min)", _quitApp, ref y);
+
+        var sleepHint = new Label
+        {
+            Text        = "0 skips that step. Unloading frees ~1 GB and wakes in ~3 s; "
+                        + "quitting frees ~2 GB and wakes in ~5 s.",
+            ForeColor   = SubFg,
+            AutoSize    = true,
+            MaximumSize = new Size(380, 0),
+            Location    = new Point(20, y),
+        };
+        Controls.Add(sleepHint);
+        y += 40;
+
+        _pressWhenAsleep = new ComboBox
+        {
+            DropDownStyle = ComboBoxStyle.DropDownList,
+            Width         = 190,
+            BackColor     = BoxBg,
+            ForeColor     = Fg,
+            FlatStyle     = FlatStyle.Flat,
+        };
+        _pressWhenAsleep.Items.AddRange(WakeChoices);
+        _pressWhenAsleep.SelectedIndex = Math.Max(0, Array.FindIndex(WakeChoices, c => c.Action == current.PressWhenAsleep));
+        AddRow("When asleep, a press", _pressWhenAsleep, ref y);
+
+        void SyncEnabled() => _sleepModel.Enabled = _quitApp.Enabled = _sleepOnLock.Enabled = _autoSleep.Checked;
+        _autoSleep.CheckedChanged += (_, _) => SyncEnabled();
+        SyncEnabled();
+
         var save = new Button
         {
             Text         = "Save",
@@ -120,7 +211,7 @@ sealed class SettingsDialog : Form
             ForeColor    = Color.White,
             AutoSize     = true,
             Padding      = new Padding(14, 4, 14, 4),
-            Location     = new Point(318, 266),
+            Location     = new Point(318, 482),
         };
         save.FlatAppearance.BorderSize = 0;
         save.Click += OnSave;
@@ -134,7 +225,7 @@ sealed class SettingsDialog : Form
             ForeColor    = Fg,
             AutoSize     = true,
             Padding      = new Padding(10, 4, 10, 4),
-            Location     = new Point(236, 266),
+            Location     = new Point(236, 482),
         };
         cancel.FlatAppearance.BorderSize = 0;
 
@@ -159,6 +250,17 @@ sealed class SettingsDialog : Form
         if (cb.SelectedIndex < 0) cb.SelectedIndex = Choices.Length - 1; // None
         return cb;
     }
+
+    private static NumericUpDown MakeMinutes(int value) => new()
+    {
+        Minimum     = 0,
+        Maximum     = 1440,
+        Value       = Math.Clamp(value, 0, 1440),
+        Width       = 70,
+        BackColor   = BoxBg,
+        ForeColor   = Fg,
+        BorderStyle = BorderStyle.FixedSingle,
+    };
 
     private void AddRow(string label, Control field, ref int y)
     {
@@ -195,6 +297,11 @@ sealed class SettingsDialog : Form
         Result.AutoStopMinutes = (int)_autoStop.Value;
         Result.AutoUpdate      = _autoUpdate.Checked;
         Result.GuardFocusChanges = _guardFocus.Checked;
+        Result.AutoSleep         = _autoSleep.Checked;
+        Result.SleepOnLock       = _sleepOnLock.Checked;
+        Result.SleepModelMinutes = (int)_sleepModel.Value;
+        Result.QuitAppMinutes    = (int)_quitApp.Value;
+        Result.PressWhenAsleep   = ((WakeChoice)_pressWhenAsleep.SelectedItem!).Action;
     }
 
     protected override void OnHandleCreated(EventArgs e)

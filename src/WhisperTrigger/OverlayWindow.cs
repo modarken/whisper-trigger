@@ -17,8 +17,14 @@ sealed class OverlayWindow : Form
     private const int WS_EX_TOOLWINDOW  = 0x00000080; // out of Alt-Tab
 
     private static readonly Color Pill = Color.FromArgb(28, 28, 28);
-    private static readonly Color Dot    = Color.FromArgb(225, 45, 45);
+    private static readonly Color RecDot   = Color.FromArgb(225, 45, 45);
+    private static readonly Color WakeDot  = Color.FromArgb(230, 160, 40);
     private static readonly Color TextFg = Color.FromArgb(240, 240, 240);
+
+    // What the badge currently says: "REC" while recording, "WAKING" while TypeWhisper
+    // starts up / loads its model after a press.
+    private string _label = "REC";
+    private Color  _dot   = RecDot;
 
     private readonly System.Windows.Forms.Timer _topmostKeeper;
 
@@ -53,8 +59,22 @@ sealed class OverlayWindow : Form
         }
     }
 
-    public void ShowRecording()
+    public void ShowRecording() => ShowBadge("REC", RecDot, 96);
+    // Amber "busy" badge: WAKING (TypeWhisper starting / loading) or STARTING (a slow start).
+    public void ShowBusy(string label) => ShowBadge(label, WakeDot, 36 + label.Length * 11 + 16);
+
+    private void ShowBadge(string label, Color dot, int width)
     {
+        if (_label != label || Width != width || _dot != dot)
+        {
+            _label = label;
+            _dot   = dot;
+            Size   = new Size(width, 34);
+            var old = Region;
+            Region = RoundedRegion(new Rectangle(Point.Empty, Size), 16);
+            old?.Dispose();
+            Invalidate();
+        }
         PositionTopCenter();
         if (!Visible) ShowInactive();   // show without activating
         ForceTopMost();
@@ -89,12 +109,12 @@ sealed class OverlayWindow : Form
         g.SmoothingMode     = SmoothingMode.AntiAlias;
         g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
 
-        using var dot = new SolidBrush(Dot);
+        using var dot = new SolidBrush(_dot);
         g.FillEllipse(dot, 16, Height / 2 - 6, 12, 12);
 
         using var txt = new SolidBrush(TextFg);
         using var font = new Font("Segoe UI Semibold", 10.5f);
-        g.DrawString("REC", font, txt, 36, Height / 2 - 11);
+        g.DrawString(_label, font, txt, 36, Height / 2 - 11);
     }
 
     private static Region RoundedRegion(Rectangle r, int radius)

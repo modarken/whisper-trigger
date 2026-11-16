@@ -60,7 +60,8 @@ toggles dictation.
 
 A small **REC badge** appears at the top-center of the screen while recording, so you can
 tell dictation is live even when the tray icon is hidden behind a full-screen Remote
-Desktop window.
+Desktop window. While TypeWhisper is waking up after a press, the badge shows **WAKING**
+instead.
 
 ### Tray icon states
 
@@ -68,8 +69,51 @@ Desktop window.
 |------|---------|
 | ● Gray | Idle — listening for button presses |
 | ● Red | Recording |
-| ● Amber | TypeWhisper is offline or not installed (dictation can't run) |
+| ● Amber | Waking/starting, or TypeWhisper is not running / not responding / not installed |
+| ● Slate blue | TypeWhisper is asleep (model unloaded, or closed) — the next press wakes it |
 | ○ Outlined | Mouse buttons disabled (pass-through to other apps) |
+
+### TypeWhisper idle sleep
+
+TypeWhisper holds its speech model in memory all the time — roughly 2 GB while idle.
+Whisper Trigger can put it to sleep when you aren't dictating and wake it on your next
+button press:
+
+1. **Unload the model** after a short idle (default 15 min). Frees ~1 GB; TypeWhisper keeps
+   running and reloads the model in ~3 s.
+2. **Quit TypeWhisper** after a long idle (default 60 min). Frees everything; Whisper
+   Trigger relaunches it minimized in ~5 s.
+
+With idle sleep on, locking the PC also unloads the model right away (can be turned off).
+
+What a press does while it's asleep is configurable: **wake and start recording** (push-to-talk
+only records if you're still holding the button once it's ready), **wake only**, or **ask
+first**.
+
+### When TypeWhisper is in a bad state
+
+Every press checks TypeWhisper before recording. If it isn't running (closed or crashed),
+isn't responding (hung), or has no model loaded, Whisper Trigger tells you what's wrong and
+fixes it — starting or restarting TypeWhisper — but **never starts recording off the back
+of a recovery**: you press again once it reports ready. (Only a sleep Whisper Trigger itself
+planned can go straight to recording.) The tray status distinguishes *not running* from
+*not responding*, and **TypeWhisper → Restart TypeWhisper** forces a fresh start.
+
+A slow start (e.g. the first dictation after a long idle) shows a **STARTING** badge instead
+of failing after 5 s. If a start or stop does fail, Whisper Trigger asks TypeWhisper whether
+it's actually recording and shows that — the REC badge never hides a live microphone. While
+recording, the badge is re-checked every 2 s and clears if TypeWhisper stopped on its own.
+
+### Buttons heal themselves
+
+Windows can silently drop the low-level mouse hook that catches the side buttons (around a
+lock/unlock or RDP reconnect). Whisper Trigger re-arms it automatically after every unlock
+and reconnect, and a watchdog re-arms it if the pointer moves while the hook hears nothing.
+**Reset** in the tray menu does the same on demand. Each re-arm is logged. TypeWhisper is never closed while it's recording or transcribing, or while its own
+window is open. The tray menu's **TypeWhisper** submenu wakes it, unloads the model, or quits it
+on demand. Turn the whole thing on in Settings (off by default).
+
+Only TypeWhisper's running state changes — your selected model and its settings are untouched.
 
 ## Settings
 
@@ -79,6 +123,10 @@ Right-click the tray icon → **Settings…** to:
 - Change the **auto-stop timeout** (1–60 minutes)
 - Turn **Stop recording if focus leaves the target window** on or off (on by default)
 - Turn on **Automatically install updates**
+- Turn on **TypeWhisper idle sleep**, set its two timers (0 skips a step), and choose what a
+  press does while it's asleep
+
+The **Enable mouse buttons** tray toggle is remembered across restarts.
 
 Settings are saved to `%APPDATA%\WhisperTrigger\settings.json`.
 

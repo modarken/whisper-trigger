@@ -85,6 +85,32 @@ For a single physical button we want **toggle** behavior: GET `status`, then POS
 | GET | `/v1/status` | Engine readiness, model info, capability flags, API version (public) |
 | GET | `/v1/models` | Available models and their status |
 
+### Model load / unload (used by idle sleep)
+
+Not in TypeWhisper's public docs; listed by `GET /v1/capabilities` (API 1.2, TypeWhisper
+1.2.8). Observed behaviour:
+
+| Method | Path | Body | Notes |
+|---|---|---|---|
+| POST | `/v1/models/unload` | `{"engine":"sherpa-onnx","model":"parakeet-tdt-0.6b"}` | ~10 ms. 400 without `engine`. Stops the transcription worker process (~0.7–1.2 GB). |
+| POST | `/v1/models/load` | same | ~3 s; spawns the worker again. |
+
+After an unload, `/v1/status` reports `"status":"no_model"` and `/v1/models` shows **no**
+model as `active`/`selected` — so remember what you unloaded. The persisted choice
+(`selectedModelId` in `%LOCALAPPDATA%\TypeWhisper-UserData\settings.json`, form
+`plugin:<plugin-id>:<model>`) is untouched, and a fresh launch loads it.
+
+### App lifecycle (not an API — how Whisper Trigger starts/stops TypeWhisper)
+
+- Current builds are an MSIX package; launch by AppUserModelID
+  (`TypeWhisper.TypeWhisper_<publisherId>!TypeWhisper`) via `IApplicationActivationManager`,
+  passing `--minimized` to start in the tray. API is answering ~4–5 s later, model loaded.
+- There's no quit endpoint, and the tray app ignores `WM_CLOSE` (hides instead), so closing
+  it means terminating the process; the worker (`--transcription-worker --parent-pid …`)
+  exits with it.
+- The old Velopack install's uninstall-registry entry can linger after migrating to MSIX
+  with no exe behind it — don't treat it as launchable.
+
 ### File transcription (not needed for the trigger, but available)
 
 | Method | Path | Purpose |
