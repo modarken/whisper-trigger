@@ -125,6 +125,12 @@ the TypeWhisper card (status plus **Wake / Sleep / Restart / Stop**), and every 
 changes apply immediately, no Save button. Click anywhere else, press Esc, or click the tray
 icon again to close it. Right-click the tray icon for a short menu (open, start/stop, exit).
 
+**Recent dictation** sits at the top: your latest dictation (a snippet, when, which app) with a big
+**Copy** button, plus the two before it with small copy buttons — for when a paste didn't land
+and you'd otherwise dig through TypeWhisper for it. **Open TypeWhisper history ›** opens
+TypeWhisper on its Home page (recent transcriptions, then **View all history**); TypeWhisper has
+no way to open its History window directly. The list refreshes each time the panel opens.
+
 From the panel you can:
 
 - Remap which side button is **toggle** vs **push-to-talk** (or disable one)

@@ -17,7 +17,7 @@ sealed record PanelState(
 enum PanelCommand
 {
     ToggleDictation, Wake, Sleep, Restart, QuitTw,
-    ResetButtons, CheckUpdates, OpenLogs, About, Exit,
+    ResetButtons, CheckUpdates, OpenLogs, About, Exit, OpenTwHistory,
 }
 
 // What the panel needs from the tray app. Settings edits are made on Settings directly,
@@ -29,6 +29,7 @@ interface IPanelHost
     bool StartAtLogin { get; set; }
     bool ButtonsEnabled { get; set; }
     void SettingsChanged();
+    IReadOnlyList<TypeWhisperClient.HistoryEntry>? FetchHistory(int count); // blocking; called off the UI thread
     void Command(PanelCommand cmd);
 }
 
@@ -46,7 +47,9 @@ sealed class ControlPanel : Form
     private static readonly Color Accent  = Color.FromArgb(210, 40, 40);
     private static readonly Color BtnBg   = Color.FromArgb(60, 60, 60);
 
-    private const int W = 640, H = 532, ColW = 296, LeftX = 16, RightX = 328;
+    private const int W = 640, ColW = 296, LeftX = 16, RightX = 328;
+    private const int HistY = 80, HistH = 152, Shift = HistH + 12; // history card on top; the rest moves down
+    private const int H = 532 + Shift;
 
     private readonly IPanelHost _host;
     private readonly float _scale;
@@ -109,15 +112,17 @@ sealed class ControlPanel : Form
         close.Click += (_, _) => HidePanel();
         _status = Add(new Label { AutoSize = true, Font = new Font("Segoe UI", 10f) }, 36, 46);
 
+        BuildHistory();
+
         // ---- Left column ----
-        int y = 80;
+        int y = 80 + Shift;
         Card(LeftX, y, 84);
         _dictate = Add(MakeButton("Start dictation", Accent), LeftX + 12, y + 12, ColW - 24, 40);
         _dictate.Font = new Font("Segoe UI Semibold", 10.5f);
         _dictate.Click += (_, _) => _host.Command(PanelCommand.ToggleDictation);
         _hint = Add(new Label { ForeColor = SubFg, BackColor = CardBg, AutoSize = true }, LeftX + 12, y + 60);
 
-        y = 176;
+        y = 176 + Shift;
         Card(LeftX, y, 112);
         Header("TYPEWHISPER", LeftX, y);
         _twStatus = Add(new Label { BackColor = CardBg, AutoSize = true }, LeftX + 12, y + 30);
@@ -137,7 +142,7 @@ sealed class ControlPanel : Form
         _restart.Click += (_, _) => _host.Command(PanelCommand.Restart);
         _quitTw.Click  += (_, _) => _host.Command(PanelCommand.QuitTw);
 
-        y = 300;
+        y = 300 + Shift;
         Card(LeftX, y, 176);
         Header("GENERAL", LeftX, y);
         _buttonsOn    = SwitchRow("Mouse buttons trigger dictation", LeftX, y + 32);
@@ -146,14 +151,14 @@ sealed class ControlPanel : Form
         _guardFocus   = SwitchRow("Stop if focus leaves the window", LeftX, y + 134);
 
         // ---- Right column ----
-        y = 80;
+        y = 80 + Shift;
         Card(RightX, y, 142);
         Header("BUTTONS", RightX, y);
         _toggleBtn = ComboRow("Toggle", ButtonChoices, RightX, y + 30);
         _pttBtn    = ComboRow("Push-to-talk", ButtonChoices, RightX, y + 64);
         _autoStop  = NumberRow("Auto-stop after (min)", 1, 60, RightX, y + 98);
 
-        y = 234;
+        y = 234 + Shift;
         Card(RightX, y, 242);
         Header("IDLE SLEEP", RightX, y);
         _autoSleep       = SwitchRow("Sleep TypeWhisper when idle", RightX, y + 32);
@@ -179,12 +184,12 @@ sealed class ControlPanel : Form
         {
             var link = MakeLink(text);
             link.Click += (_, _) => _host.Command(cmd);
-            Add(link, fx, 492);
+            Add(link, fx, 492 + Shift);
             fx += (int)(TextRenderer.MeasureText(text, link.Font).Width / _scale) + 18;
         }
         var exit = MakeLink("Exit");
         exit.Click += (_, _) => _host.Command(PanelCommand.Exit);
-        Add(exit, W - 16 - (int)(TextRenderer.MeasureText("Exit", exit.Font).Width / _scale), 492);
+        Add(exit, W - 16 - (int)(TextRenderer.MeasureText("Exit", exit.Font).Width / _scale), 492 + Shift);
 
         // ---- Settings wiring: every change applies at once ----
         _buttonsOn.CheckedChanged    += (_, _) => { if (!_syncing) _host.ButtonsEnabled = _buttonsOn.Checked; };
@@ -210,6 +215,7 @@ sealed class ControlPanel : Form
     {
         LoadSettings();
         UpdateState(state);
+        RefreshHistory();
         var cursor = Cursor.Position;
         var wa = nearCursor ? Screen.FromPoint(cursor).WorkingArea : Screen.PrimaryScreen!.WorkingArea;
         int m = S(12);
@@ -228,6 +234,16 @@ sealed class ControlPanel : Form
 
     public void UpdateState(PanelState s)
     {
+        // A dictation just finished while the panel is open: pick it up once TypeWhisper
+        // has had a moment to transcribe and save it.
+        if (_wasRecording && !s.Recording && Visible)
+        {
+            var t = new System.Windows.Forms.Timer { Interval = 2500 };
+            t.Tick += (_, _) => { t.Dispose(); if (Visible) RefreshHistory(); };
+            t.Start();
+        }
+        _wasRecording = s.Recording;
+
         _status.Text = s.Status;
         if (_dot != s.Dot) { _dot = s.Dot; Invalidate(new Rectangle(S(LeftX), S(46), S(18), S(22))); }
         _dictate.Text      = s.Recording ? "Stop dictation" : s.Busy ? "Waking…" : "Start dictation";
@@ -241,6 +257,164 @@ sealed class ControlPanel : Form
         _syncing = true;
         _buttonsOn.Checked = _host.ButtonsEnabled;
         _syncing = false;
+    }
+
+    // ---- Recent dictation (history) ---------------------------------------------
+    //
+    // The latest dictation with a big Copy button — for when a paste didn't land and the
+    // text has to be fished out of TypeWhisper — plus the two before it.
+
+    private const int HistW = W - 2 * LeftX;
+    private Label _histLatest = null!, _histLatestMeta = null!;
+    private IconButton _histCopy = null!;
+    private readonly Label[] _histText = new Label[2], _histMeta = new Label[2];
+    private readonly IconButton[] _histCopySmall = new IconButton[2];
+    private IReadOnlyList<TypeWhisperClient.HistoryEntry>? _history;
+    private int _historyGen;      // drops a slow fetch's result if a newer one was started
+    private bool _wasRecording;   // to refresh the list once a dictation finishes
+
+    private void BuildHistory()
+    {
+        int x = LeftX, y = HistY;
+        Card(x, y, HistH, HistW);
+        Header("RECENT DICTATION", x, y);
+
+        var open = MakeLink("Open TypeWhisper history ›");
+        open.BackColor = CardBg;
+        open.Click += (_, _) => _host.Command(PanelCommand.OpenTwHistory);
+        Add(open, x + HistW - 12 - (int)(TextRenderer.MeasureText(open.Text, open.Font).Width / _scale), y + 9);
+
+        // Latest: two lines of text, when/where, and the big Copy button.
+        _histLatest = Add(new Label
+        {
+            BackColor = CardBg, AutoEllipsis = true, UseMnemonic = false,
+            Font = new Font("Segoe UI", 9.5f),
+        }, x + 12, y + 32, HistW - 24 - 104, 38);
+        _histLatestMeta = Add(new Label { BackColor = CardBg, ForeColor = SubFg, AutoSize = true }, x + 12, y + 72);
+        _histCopy = Add(new IconButton
+        {
+            Text = "Copy", Icon = IconKind.Copy, IconColor = Color.White,
+            BackColor = Color.FromArgb(40, 110, 200), ForeColor = Color.White, SurfaceColor = CardBg,
+            Font = new Font("Segoe UI Semibold", 9f),
+        }, x + HistW - 12 - 92, y + 32, 92, 54);
+        _histCopy.Click += (_, _) => CopyEntry(0, _histCopy, "Copy");
+
+        // The two before it: one line each, with a small copy button.
+        for (int i = 0; i < 2; i++)
+        {
+            int ry = y + 96 + i * 26;
+            int idx = i + 1;
+            _histText[i] = Add(new Label
+            {
+                BackColor = CardBg, ForeColor = Color.FromArgb(205, 205, 205), AutoEllipsis = true, UseMnemonic = false,
+            }, x + 12, ry + 3, HistW - 24 - 36 - 150, 18);
+            _histMeta[i] = Add(new Label
+            {
+                BackColor = CardBg, ForeColor = SubFg, TextAlign = ContentAlignment.MiddleRight, AutoEllipsis = true,
+            }, x + HistW - 12 - 36 - 146, ry + 3, 140, 18);
+            var small = Add(new IconButton
+            {
+                Icon = IconKind.Copy, IconColor = Fg, BackColor = BtnBg, ForeColor = Fg, SurfaceColor = CardBg,
+            }, x + HistW - 12 - 30, ry, 30, 24);
+            small.Click += (_, _) => CopyEntry(idx, small, "");
+            _histCopySmall[i] = small;
+        }
+        var tips = new ToolTip { InitialDelay = 400 };
+        tips.SetToolTip(_histCopy, "Copy your latest dictation to the clipboard");
+        tips.SetToolTip(open, "Opens TypeWhisper on its Home page — click “View all history” there");
+        ShowHistory(null, loading: true);
+    }
+
+    // Fetches the newest entries in the background and shows them when they arrive.
+    private void RefreshHistory()
+    {
+        int gen = ++_historyGen;
+        Task.Run(() => _host.FetchHistory(3)).ContinueWith(t =>
+        {
+            var list = t.IsCompletedSuccessfully ? t.Result : null;
+            if (IsHandleCreated && !IsDisposed)
+                BeginInvoke(() => { if (gen == _historyGen) ShowHistory(list, loading: false); });
+        });
+    }
+
+    private void ShowHistory(IReadOnlyList<TypeWhisperClient.HistoryEntry>? list, bool loading)
+    {
+        // Keep showing what we had while a refresh fails or is in flight.
+        if (list is null && _history is not null) return;
+        _history = list;
+
+        if (list is null || list.Count == 0)
+        {
+            _histLatest.Text = loading ? "Loading…"
+                             : list is null ? "Couldn't reach TypeWhisper's history — is TypeWhisper running?"
+                             : "No dictations yet.";
+            _histLatest.ForeColor = SubFg;
+            _histLatestMeta.Text = "";
+            _histCopy.Enabled = false;
+        }
+        else
+        {
+            _histLatest.Text = Snippet(list[0].Text);
+            _histLatest.ForeColor = Fg;
+            _histLatestMeta.Text = Meta(list[0], withWords: true);
+            _histCopy.Enabled = true;
+        }
+        for (int i = 0; i < 2; i++)
+        {
+            var e = list is not null && list.Count > i + 1 ? list[i + 1] : null;
+            _histText[i].Text = e is null ? "" : Snippet(e.Text);
+            _histMeta[i].Text = e is null ? "" : Meta(e, withWords: false);
+            _histCopySmall[i].Visible = e is not null;
+        }
+    }
+
+    private void CopyEntry(int index, IconButton button, string label)
+    {
+        if (_history is null || index >= _history.Count) return;
+        try
+        {
+            Clipboard.SetDataObject(_history[index].Text, copy: true, retryTimes: 5, retryDelay: 100);
+        }
+        catch (Exception ex)
+        {
+            Log.Write($"copy from history failed: {ex.Message}");
+            return;
+        }
+        // Brief confirmation on the button itself.
+        button.Icon = IconKind.Check;
+        if (label.Length > 0) button.Text = "Copied";
+        button.Invalidate();
+        var t = new System.Windows.Forms.Timer { Interval = 1500 };
+        t.Tick += (_, _) =>
+        {
+            t.Dispose();
+            button.Icon = IconKind.Copy;
+            if (label.Length > 0) button.Text = label;
+            button.Invalidate();
+        };
+        t.Start();
+    }
+
+    private static string Snippet(string text) =>
+        System.Text.RegularExpressions.Regex.Replace(text, @"\s+", " ").Trim();
+
+    private static string Meta(TypeWhisperClient.HistoryEntry e, bool withWords)
+    {
+        var parts = new List<string> { Ago(e.Timestamp) };
+        if (!string.IsNullOrWhiteSpace(e.App)) parts.Add(e.App!.Length > 28 ? e.App[..27] + "…" : e.App);
+        if (withWords && e.Words > 0) parts.Add($"{e.Words} words");
+        return string.Join(" · ", parts);
+    }
+
+    private static string Ago(DateTime t)
+    {
+        if (t == DateTime.MinValue) return "";
+        var d = DateTime.Now - t;
+        if (d.TotalSeconds < 60) return "just now";
+        if (d.TotalMinutes < 60) return $"{(int)d.TotalMinutes} min ago";
+        if (t.Date == DateTime.Today) return $"{(int)d.TotalHours} h ago";
+        if (t.Date == DateTime.Today.AddDays(-1)) return $"yesterday {t:t}";
+        return t.ToString("MMM d, t");
     }
 
     // ---- Settings ---------------------------------------------------------------
@@ -332,7 +506,7 @@ sealed class ControlPanel : Form
         return c;
     }
 
-    private void Card(int x, int y, int h) => _cards.Add(new Rectangle(S(x), S(y), S(ColW), S(h)));
+    private void Card(int x, int y, int h, int w = ColW) => _cards.Add(new Rectangle(S(x), S(y), S(w), S(h)));
 
     private void Header(string text, int x, int y) =>
         Add(new Label
@@ -509,7 +683,7 @@ sealed class FlatButton : Button
     protected override bool ShowFocusCues => false;
 }
 
-enum IconKind { Play, Pause, Stop, Restart }
+enum IconKind { Play, Pause, Stop, Restart, Copy, Check }
 
 // A media-style button: a crisp, hand-drawn icon above a word. Never takes focus (see
 // FlatButton). Greys out icon and text when disabled.
@@ -539,6 +713,18 @@ sealed class IconButton : Control
     protected override void OnEnabledChanged(EventArgs e) { _hover = _down = false; Invalidate(); base.OnEnabledChanged(e); }
     protected override void OnTextChanged(EventArgs e)    { Invalidate(); base.OnTextChanged(e); }
 
+    private static GraphicsPath RoundRect(RectangleF r, float radius)
+    {
+        float d = radius * 2;
+        var p = new GraphicsPath();
+        p.AddArc(r.X, r.Y, d, d, 180, 90);
+        p.AddArc(r.Right - d, r.Y, d, d, 270, 90);
+        p.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
+        p.AddArc(r.X, r.Bottom - d, d, d, 90, 90);
+        p.CloseFigure();
+        return p;
+    }
+
     protected override void OnPaint(PaintEventArgs e)
     {
         var g = e.Graphics;
@@ -562,9 +748,10 @@ sealed class IconButton : Control
             g.FillPath(b, path);
         }
 
-        // Icon in the upper part, word below.
-        float s  = Height * 0.30f;               // icon box size
-        float cx = Width / 2f, cy = Height * 0.36f;
+        // Icon in the upper part and the word below — or, with no word, the icon centred.
+        bool iconOnly = string.IsNullOrEmpty(Text);
+        float s  = iconOnly ? Math.Min(Width, Height) * 0.55f : Height * 0.30f; // icon box size
+        float cx = Width / 2f, cy = iconOnly ? Height / 2f : Height * 0.36f;
         var box  = new RectangleF(cx - s / 2, cy - s / 2, s, s);
         Color ic = Enabled ? IconColor : Color.FromArgb(105, 105, 105);
         using (var brush = new SolidBrush(ic))
@@ -588,6 +775,33 @@ sealed class IconButton : Control
                     var sq = RectangleF.Inflate(box, -s * 0.06f, -s * 0.06f);
                     g.FillRectangle(brush, sq);
                     break;
+                case IconKind.Copy:
+                {
+                    float cpw = Math.Max(1.3f, s * 0.11f), side = s * 0.68f, rad = s * 0.12f;
+                    using var pen = new Pen(ic, cpw);
+                    var back  = new RectangleF(box.Right - side, box.Top, side, side);
+                    var front = new RectangleF(box.Left, box.Bottom - side, side, side);
+                    using (var p = RoundRect(back, rad)) g.DrawPath(pen, p);
+                    using (var p = RoundRect(front, rad))
+                    {
+                        using var fill = new SolidBrush(bg);
+                        g.FillPath(fill, p);   // front sheet hides the back one's corner
+                        g.DrawPath(pen, p);
+                    }
+                    break;
+                }
+                case IconKind.Check:
+                {
+                    using var pen = new Pen(Color.FromArgb(110, 220, 140), Math.Max(1.8f, s * 0.16f))
+                        { StartCap = LineCap.Round, EndCap = LineCap.Round, LineJoin = LineJoin.Round };
+                    g.DrawLines(pen, new[]
+                    {
+                        new PointF(box.Left + s * 0.08f, cy + s * 0.02f),
+                        new PointF(box.Left + s * 0.38f, box.Bottom - s * 0.15f),
+                        new PointF(box.Right - s * 0.05f, box.Top + s * 0.18f),
+                    });
+                    break;
+                }
                 case IconKind.Restart:
                     float pw = Math.Max(1.5f, s * 0.15f);
                     using (var pen = new Pen(ic, pw))
@@ -609,6 +823,7 @@ sealed class IconButton : Control
             }
         }
 
+        if (iconOnly) return;
         var textRect = new Rectangle(0, (int)(Height * 0.58f), Width, (int)(Height * 0.36f));
         TextRenderer.DrawText(g, Text, Font, textRect, Enabled ? ForeColor : Color.FromArgb(120, 120, 120), bg,
             TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);

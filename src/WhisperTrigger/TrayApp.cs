@@ -915,6 +915,8 @@ sealed class TrayApp : ApplicationContext, IPanelHost
         _hook.PttButton    = _settings.PttButton;
     }
 
+    IReadOnlyList<TypeWhisperClient.HistoryEntry>? IPanelHost.FetchHistory(int count) => _client.GetHistory(count);
+
     void IPanelHost.Command(PanelCommand cmd)
     {
         switch (cmd)
@@ -937,6 +939,11 @@ sealed class TrayApp : ApplicationContext, IPanelHost
                     about.ShowDialog();
                 break;
             case PanelCommand.Exit:         ExitThread(); break;
+            case PanelCommand.OpenTwHistory:
+                _panel.HidePanel();
+                if (!_twApp.OpenDashboard())
+                    Notify("Couldn't open TypeWhisper.", ToolTipIcon.Warning);
+                break;
         }
     }
 

@@ -131,6 +131,39 @@ sealed class TypeWhisperClient : IDisposable
         catch { return null; }
     }
 
+    public sealed record HistoryEntry(string Text, DateTime Timestamp, string? App, int Words);
+
+    // The newest dictations, newest first (GET /v1/history; the API caps a page at 200).
+    // Null if TypeWhisper is unreachable or the response shape is unexpected.
+    public IReadOnlyList<HistoryEntry>? GetHistory(int limit)
+    {
+        var (url, token) = Discover();
+        using var req = new HttpRequestMessage(HttpMethod.Get, $"{url}/v1/history?limit={limit}");
+        if (token is not null) AddAuthHeader(req, token);
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+            using var resp = _http.Send(req, cts.Token);
+            if (!resp.IsSuccessStatusCode) return null;
+            using var doc = JsonDocument.Parse(resp.Content.ReadAsStringAsync().GetAwaiter().GetResult());
+            if (!doc.RootElement.TryGetProperty("entries", out var entries) || entries.ValueKind != JsonValueKind.Array)
+                return null;
+            var list = new List<HistoryEntry>();
+            foreach (var e in entries.EnumerateArray())
+            {
+                string? text = e.TryGetProperty("text", out var t) ? t.GetString() : null;
+                if (string.IsNullOrWhiteSpace(text)) continue;
+                DateTime ts = e.TryGetProperty("timestamp", out var s) && s.TryGetDateTime(out var d)
+                    ? d.ToLocalTime() : DateTime.MinValue;
+                string? app = e.TryGetProperty("app_name", out var a) ? a.GetString() : null;
+                int words = e.TryGetProperty("words_count", out var w) && w.TryGetInt32(out var n) ? n : 0;
+                list.Add(new HistoryEntry(text, ts, app, words));
+            }
+            return list;
+        }
+        catch { return null; }
+    }
+
     public bool LoadModel(ModelInfo m)   => PostModel("/v1/models/load", m, _slowHttp);
     public bool UnloadModel(ModelInfo m) => PostModel("/v1/models/unload", m, _http);
 

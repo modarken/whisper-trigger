@@ -96,6 +96,31 @@ sealed class TypeWhisperApp
         return false;
     }
 
+    // Opens TypeWhisper's window on its Home page (recent transcriptions + "View all
+    // history"). There's no switch for the History window itself; --dashboard is the
+    // closest. Passed to the running instance if there is one, else it starts TypeWhisper.
+    public bool OpenDashboard()
+    {
+        if (!CanLaunch) Locate();
+        try
+        {
+            if (_aumid is not null)
+            {
+                var mgr = (IApplicationActivationManager)new ApplicationActivationManager();
+                int hr = mgr.ActivateApplication(_aumid, "--dashboard", 0, out _);
+                if (hr != 0) Marshal.ThrowExceptionForHR(hr);
+                return true;
+            }
+            if (_exePath is not null)
+            {
+                using var p = Process.Start(new ProcessStartInfo(_exePath, "--dashboard") { UseShellExecute = false });
+                return true;
+            }
+        }
+        catch (Exception ex) { Log.Write($"open TypeWhisper dashboard failed: {ex.Message}"); }
+        return false;
+    }
+
     // Closes TypeWhisper. Its tray app ignores a polite WM_CLOSE (it hides instead of
     // exiting), so this terminates the process; its transcription worker watches the
     // parent and exits with it. Callers only do this while dictation is idle.
