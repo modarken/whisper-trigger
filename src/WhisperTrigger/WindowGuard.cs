@@ -4,8 +4,8 @@ namespace WhisperTrigger;
 
 // Watches the system foreground window while dictation is recording. If focus moves
 // away from the window that was focused when recording started — to anything other than
-// our own sink window — it raises ContextChanged so the paste can be redirected into a
-// window we control instead of leaking into a random app.
+// our own overlay — it raises ContextChanged so the original window can be restored
+// before the paste.
 //
 // The WinEvent callback fires on the thread that installed the hook (the WinForms
 // message-pump thread). The debounce re-check runs on a timer thread, so ContextChanged
@@ -29,7 +29,6 @@ sealed class WindowGuard : IDisposable
     private volatile bool _recording;            // armed only between Start and Stop
     private volatile bool _fired;                 // once-per-session latch
     private IntPtr _target;                       // window focused when recording started
-    private IntPtr _sinkHandle;                   // our own window — never a "change"
     private IntPtr _overlayHandle;                // the REC overlay — also never a "change"
     private System.Threading.Timer? _debounce;    // delayed re-check
 
@@ -44,16 +43,12 @@ sealed class WindowGuard : IDisposable
                 $"Failed to install foreground WinEvent hook (Win32 error {Marshal.GetLastWin32Error()}).");
     }
 
-    // The sink window's handle, so the guard never mistakes our own window for a context
-    // change. Set once the sink form's handle exists.
-    public IntPtr SinkHandle { get => _sinkHandle; set => _sinkHandle = value; }
-
     // The overlay window's handle, so the guard never treats our own REC badge as a
     // context change (it shouldn't ever take focus, but ignore it defensively).
     public IntPtr OverlayHandle { get => _overlayHandle; set => _overlayHandle = value; }
 
     private bool IsOwnWindow(IntPtr hwnd) =>
-        hwnd == _target || hwnd == _sinkHandle || hwnd == _overlayHandle;
+        hwnd == _target || hwnd == _overlayHandle;
 
     // Called on the worker thread when recording starts: remember the focused window and
     // arm the hook.
@@ -75,7 +70,7 @@ sealed class WindowGuard : IDisposable
 
     // Tries to bring the captured target window back to the foreground so the paste lands
     // in it. Returns true only if the target is alive and is now actually the foreground
-    // window; false means the caller should fall back to the sink. UI-thread only.
+    // window; false means it's gone or Windows refused the switch. UI-thread only.
     public bool RestoreTarget()
     {
         if (!TargetIsAlive()) return false;

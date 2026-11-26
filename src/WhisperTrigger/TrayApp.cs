@@ -52,7 +52,6 @@ sealed class TrayApp : ApplicationContext, IPanelHost
     private readonly TypeWhisperClient _client;
     private readonly MouseHook _hook;
     private readonly WindowGuard _guard;
-    private readonly SinkWindow _sink;
     private readonly OverlayWindow _overlay;
     private readonly Updater _updater = new();
     private readonly Settings _settings;
@@ -132,10 +131,10 @@ sealed class TrayApp : ApplicationContext, IPanelHost
         _ = _overlay.Handle; // force handle creation so the guard can ignore it
 
         // Focus guard — captures the target window at start; if focus leaves it during
-        // recording, we restore the original window before stopping (or, if it's gone,
-        // redirect the paste into our own sink window instead of a random app).
-        _sink  = new SinkWindow();
-        _guard = new WindowGuard { SinkHandle = _sink.Handle, OverlayHandle = _overlay.Handle };
+        // recording, we restore the original window before stopping. If it can't be
+        // restored, TypeWhisper (1.1+) refuses to paste anywhere else and shows the text
+        // in its own review window, so there's nothing more for us to do.
+        _guard = new WindowGuard { OverlayHandle = _overlay.Handle };
         _guard.ContextChanged += OnContextChanged;
 
         // Worker thread handles all HTTP so the hook callback returns instantly
@@ -244,9 +243,9 @@ sealed class TrayApp : ApplicationContext, IPanelHost
                         if (_recording && !_pttHeld) DoStop();
                         break;
                     case Cmd.ContextLost:
-                        // Focus left the target window; OnContextChanged has already put
-                        // focus on the original window (or the sink), so this stop pastes
-                        // the transcription there rather than into a random app.
+                        // Focus left the target window; OnContextChanged has already tried to
+                        // put focus back on it, so this stop pastes the transcription there.
+                        // If that failed, TypeWhisper shows the text for the user to copy.
                         if (_recording) DoStop();
                         break;
                     case Cmd.AutoStop:
@@ -527,24 +526,22 @@ sealed class TrayApp : ApplicationContext, IPanelHost
 
     // Fires on a thread-pool (debounce timer) thread when focus leaves the target window
     // during recording. Bring the original window back to the foreground so the paste
-    // lands there; only if it's gone (closed/crashed) fall back to the sink window. Done
-    // synchronously so focus is settled before the worker stops dictation.
+    // lands there. Done synchronously so focus is settled before the worker stops dictation.
+    // If it can't be brought back (closed, or Windows refused), we don't open a window of
+    // our own: TypeWhisper only pastes into the window dictation started in, so it would
+    // never paste into ours — it copies the text and shows its own review window instead.
     private void OnContextChanged(object? sender, EventArgs e)
     {
         // Defensive: with the guard disabled we never arm it, so this shouldn't fire —
         // but a setting flipped mid-recording could race an already-queued debounce.
         if (!_recording || !_settings.GuardFocusChanges) return;
         bool restored = false;
-        _sync.Send(_ => {
-            restored = _guard.RestoreTarget();
-            if (!restored) _sink.ShowAndFocus();
-        }, null);
+        _sync.Send(_ => restored = _guard.RestoreTarget(), null);
+        Log.Write($"focus left the dictation window -> {(restored ? "restored" : "could not restore")}, stopping");
         Enqueue(Cmd.ContextLost);
-        _sync.Post(_ => Notify(
-            restored
-                ? "Focus changed — returned to your original window."
-                : "Original window unavailable — dictation captured in a safe window.",
-            ToolTipIcon.Warning), null);
+        // When not restored, TypeWhisper's own window says what happened — no toast on top of it.
+        if (restored)
+            _sync.Post(_ => Notify("Focus changed — returned to your original window.", ToolTipIcon.Warning), null);
     }
 
     private void DoStart()
@@ -1099,7 +1096,6 @@ sealed class TrayApp : ApplicationContext, IPanelHost
             _showPanelWait.Unregister(null);
             _showPanelEvent.Dispose();
             _panel.Dispose();
-            _sink.Dispose();
             _tray.Visible = false;
             _tray.Dispose();
             _icon.Dispose();

@@ -26,9 +26,8 @@ sealed class Settings
     public bool AutoUpdate      { get; set; } = false; // install updates automatically on launch
 
     // Watch for focus leaving the target window mid-recording and, when it does, restore
-    // that window (or the sink) and stop dictation early so the paste can't land in a
-    // random app. Off means recording runs uninterrupted and the text pastes wherever
-    // focus happens to be at stop time.
+    // that window and stop dictation early so the text pastes where dictation started.
+    // Off means recording runs uninterrupted until the user stops it.
     public bool GuardFocusChanges { get; set; } = true;
 
     // Idle sleep: free TypeWhisper's memory when dictation hasn't been used for a while.

@@ -5,8 +5,7 @@ using System.Windows.Forms;
 
 namespace WhisperTrigger;
 
-// A proper About dialog (replaces the old balloon-tip "about"). Dark card matching the
-// sink window, showing the app name, version, a one-line description, a repo link, and
+// A proper About dialog (replaces the old balloon-tip "about"). Dark card showing the app name, version, a one-line description, a repo link, and
 // a Check-for-updates button wired back to the tray app's updater.
 sealed class AboutBox : Form
 {

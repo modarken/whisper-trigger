@@ -162,14 +162,13 @@ The app self-updates from GitHub Releases:
 - Recording auto-stops after the configured timeout (default 5 minutes) if you forget to
   release/toggle.
 - **Focus guard** (on by default): if focus leaves your target window mid-dictation,
-  Whisper Trigger stops recording early, returns to the original window, and pastes there;
-  if that window is gone, the text is captured in a safe pop-up instead of landing in a
-  random app. The early stop is the point — it keeps the transcription from going somewhere
-  you didn't intend.
+  Whisper Trigger stops recording early, returns to the original window, and pastes there.
+  If that window is gone, TypeWhisper (1.1 and later) won't paste anywhere else: it copies
+  the text to the clipboard and shows it in its own "Text could not be inserted" window.
   - The trade-off is that anything which briefly steals focus (a toast, an installer, a
     misbehaving app) cuts your dictation short. If recordings keep ending mid-sentence,
-    turn the guard off in the control panel; recording then runs uninterrupted and the text pastes
-    into whatever window has focus when you stop.
+    turn the guard off in the control panel; recording then runs uninterrupted until you
+    stop it.
 - Whisper Trigger only *detects and reports* TypeWhisper's state — it never starts,
   installs, or manages TypeWhisper itself.
 - Only one instance runs at a time; launching a second copy exits immediately.
