@@ -60,7 +60,7 @@ sealed class ControlPanel : Form
     private readonly Label _status, _twStatus, _hint, _version;
     private readonly Button _dictate;
     private readonly IconButton _wake, _sleep, _restart, _quitTw;
-    private readonly ToggleSwitch _buttonsOn, _startAtLogin, _autoUpdate, _guardFocus, _autoSleep, _sleepOnLock;
+    private readonly ToggleSwitch _buttonsOn, _startAtLogin, _autoUpdate, _autoSleep, _sleepOnLock;
     private readonly ComboBox _toggleBtn, _pttBtn, _pressWhenAsleep;
     private readonly NumericUpDown _autoStop, _sleepModel, _quitApp;
 
@@ -143,12 +143,11 @@ sealed class ControlPanel : Form
         _quitTw.Click  += (_, _) => _host.Command(PanelCommand.QuitTw);
 
         y = 300 + Shift;
-        Card(LeftX, y, 176);
+        Card(LeftX, y, 142);
         Header("GENERAL", LeftX, y);
         _buttonsOn    = SwitchRow("Mouse buttons trigger dictation", LeftX, y + 32);
         _startAtLogin = SwitchRow("Start at login", LeftX, y + 66);
         _autoUpdate   = SwitchRow("Install updates automatically", LeftX, y + 100);
-        _guardFocus   = SwitchRow("Stop if focus leaves the window", LeftX, y + 134);
 
         // ---- Right column ----
         y = 80 + Shift;
@@ -195,7 +194,6 @@ sealed class ControlPanel : Form
         _buttonsOn.CheckedChanged    += (_, _) => { if (!_syncing) _host.ButtonsEnabled = _buttonsOn.Checked; };
         _startAtLogin.CheckedChanged += (_, _) => { if (!_syncing) _host.StartAtLogin = _startAtLogin.Checked; };
         _autoUpdate.CheckedChanged   += (_, _) => Edit(s => s.AutoUpdate = _autoUpdate.Checked);
-        _guardFocus.CheckedChanged   += (_, _) => Edit(s => s.GuardFocusChanges = _guardFocus.Checked);
         _autoSleep.CheckedChanged    += (_, _) => { Edit(s => s.AutoSleep = _autoSleep.Checked); SyncEnabled(); };
         _sleepOnLock.CheckedChanged  += (_, _) => Edit(s => s.SleepOnLock = _sleepOnLock.Checked);
         _autoStop.ValueChanged   += (_, _) => Edit(s => s.AutoStopMinutes = (int)_autoStop.Value);
@@ -429,7 +427,6 @@ sealed class ControlPanel : Form
             _buttonsOn.Checked    = _host.ButtonsEnabled;
             _startAtLogin.Checked = _host.StartAtLogin;
             _autoUpdate.Checked   = s.AutoUpdate;
-            _guardFocus.Checked   = s.GuardFocusChanges;
             _autoSleep.Checked    = s.AutoSleep;
             _sleepOnLock.Checked  = s.SleepOnLock;
             _autoStop.Value   = Math.Clamp(s.AutoStopMinutes, 1, 60);

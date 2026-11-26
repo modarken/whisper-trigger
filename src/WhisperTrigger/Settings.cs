@@ -25,11 +25,6 @@ sealed class Settings
     public int  AutoStopMinutes { get; set; } = 5;
     public bool AutoUpdate      { get; set; } = false; // install updates automatically on launch
 
-    // Watch for focus leaving the target window mid-recording and, when it does, restore
-    // that window and stop dictation early so the text pastes where dictation started.
-    // Off means recording runs uninterrupted until the user stops it.
-    public bool GuardFocusChanges { get; set; } = true;
-
     // Idle sleep: free TypeWhisper's memory when dictation hasn't been used for a while.
     // Two tiers — unload the speech model first (wakes in ~3 s), then quit TypeWhisper
     // entirely (wakes in ~5 s). Either timer at 0 skips that tier.

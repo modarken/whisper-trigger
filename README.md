@@ -135,7 +135,6 @@ From the panel you can:
 
 - Remap which side button is **toggle** vs **push-to-talk** (or disable one)
 - Change the **auto-stop timeout** (1–60 minutes)
-- Turn **Stop recording if focus leaves the target window** on or off (on by default)
 - Turn on **Automatically install updates**
 - Turn on **TypeWhisper idle sleep**, set its two timers (0 skips a step), and choose what a
   press does while it's asleep
@@ -161,14 +160,12 @@ The app self-updates from GitHub Releases:
   redirection can leave the dictated text on the clipboard; that's an RDP limitation.)
 - Recording auto-stops after the configured timeout (default 5 minutes) if you forget to
   release/toggle.
-- **Focus guard** (on by default): if focus leaves your target window mid-dictation,
-  Whisper Trigger stops recording early, returns to the original window, and pastes there.
-  If that window is gone, TypeWhisper (1.1 and later) won't paste anywhere else: it copies
-  the text to the clipboard and shows it in its own "Text could not be inserted" window.
-  - The trade-off is that anything which briefly steals focus (a toast, an installer, a
-    misbehaving app) cuts your dictation short. If recordings keep ending mid-sentence,
-    turn the guard off in the control panel; recording then runs uninterrupted until you
-    stop it.
+- **Switching windows mid-dictation** is handled by TypeWhisper, not Whisper Trigger.
+  TypeWhisper (1.1 and later) only pastes into the window you started dictating in. If a
+  different window is in front when you stop, it copies the text to the clipboard and shows
+  it in its own "Text could not be inserted" window instead. To have it bring the original
+  field back and paste there, turn on **Paste only into the original field** in
+  TypeWhisper's Dictation settings.
 - Whisper Trigger only *detects and reports* TypeWhisper's state — it never starts,
   installs, or manages TypeWhisper itself.
 - Only one instance runs at a time; launching a second copy exits immediately.

@@ -8,7 +8,8 @@ namespace WhisperTrigger;
 // A small always-on-top "REC" badge shown while recording. Its whole reason to exist:
 // in a full-screen RDP session the tray icon is hidden, so there is otherwise no sign
 // that dictation is live. The window is click-through and never activates, so it floats
-// over RDP without stealing focus (which would otherwise trip the WindowGuard).
+// over RDP without stealing focus (TypeWhisper only pastes into the window dictation
+// started in, so taking focus would make it refuse the paste).
 sealed class OverlayWindow : Form
 {
     private const int WS_EX_LAYERED     = 0x00080000;

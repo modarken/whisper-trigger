@@ -12,7 +12,7 @@ sealed class TrayApp : ApplicationContext, IPanelHost
 {
     private enum Cmd
     {
-        Toggle, PttDown, PttUp, AutoStop, ContextLost, Reset,
+        Toggle, PttDown, PttUp, AutoStop, Reset,
         Wake, SleepModel, QuitTw, RestartTw, IdleCheck, LockSleep, SyncRecording,
     }
 
@@ -51,7 +51,6 @@ sealed class TrayApp : ApplicationContext, IPanelHost
     private readonly SynchronizationContext _sync;
     private readonly TypeWhisperClient _client;
     private readonly MouseHook _hook;
-    private readonly WindowGuard _guard;
     private readonly OverlayWindow _overlay;
     private readonly Updater _updater = new();
     private readonly Settings _settings;
@@ -128,14 +127,6 @@ sealed class TrayApp : ApplicationContext, IPanelHost
 
         // Recording badge — visible over full-screen RDP where the tray icon is hidden.
         _overlay = new OverlayWindow();
-        _ = _overlay.Handle; // force handle creation so the guard can ignore it
-
-        // Focus guard — captures the target window at start; if focus leaves it during
-        // recording, we restore the original window before stopping. If it can't be
-        // restored, TypeWhisper (1.1+) refuses to paste anywhere else and shows the text
-        // in its own review window, so there's nothing more for us to do.
-        _guard = new WindowGuard { OverlayHandle = _overlay.Handle };
-        _guard.ContextChanged += OnContextChanged;
 
         // Worker thread handles all HTTP so the hook callback returns instantly
         new Thread(WorkerLoop) { IsBackground = true, Name = "tw-worker" }.Start();
@@ -236,17 +227,11 @@ sealed class TrayApp : ApplicationContext, IPanelHost
                         IdleCheck();
                         break;
                     case Cmd.PttUp:
-                        // May already be stopped if a context change redirected the paste.
+                        // May already be stopped (auto-stop, or TypeWhisper stopped on its own).
                         // If the button is held again by now, this release is stale — e.g.
                         // let go during a wake-up, then pressed again, so the wake started
                         // recording for the new hold. The new hold's own release stops it.
                         if (_recording && !_pttHeld) DoStop();
-                        break;
-                    case Cmd.ContextLost:
-                        // Focus left the target window; OnContextChanged has already tried to
-                        // put focus back on it, so this stop pastes the transcription there.
-                        // If that failed, TypeWhisper shows the text for the user to copy.
-                        if (_recording) DoStop();
                         break;
                     case Cmd.AutoStop:
                         if (_recording)
@@ -524,26 +509,6 @@ sealed class TrayApp : ApplicationContext, IPanelHost
             SleepModel(manual: false);
     }
 
-    // Fires on a thread-pool (debounce timer) thread when focus leaves the target window
-    // during recording. Bring the original window back to the foreground so the paste
-    // lands there. Done synchronously so focus is settled before the worker stops dictation.
-    // If it can't be brought back (closed, or Windows refused), we don't open a window of
-    // our own: TypeWhisper only pastes into the window dictation started in, so it would
-    // never paste into ours — it copies the text and shows its own review window instead.
-    private void OnContextChanged(object? sender, EventArgs e)
-    {
-        // Defensive: with the guard disabled we never arm it, so this shouldn't fire —
-        // but a setting flipped mid-recording could race an already-queued debounce.
-        if (!_recording || !_settings.GuardFocusChanges) return;
-        bool restored = false;
-        _sync.Send(_ => restored = _guard.RestoreTarget(), null);
-        Log.Write($"focus left the dictation window -> {(restored ? "restored" : "could not restore")}, stopping");
-        Enqueue(Cmd.ContextLost);
-        // When not restored, TypeWhisper's own window says what happened — no toast on top of it.
-        if (restored)
-            _sync.Post(_ => Notify("Focus changed — returned to your original window.", ToolTipIcon.Warning), null);
-    }
-
     private void DoStart()
     {
         Touch();
@@ -606,16 +571,13 @@ sealed class TrayApp : ApplicationContext, IPanelHost
         if (error is not null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(error);
     }
 
-    // Local bookkeeping for "a recording is live": REC badge, focus guard, auto-stop timer,
+    // Local bookkeeping for "a recording is live": REC badge, auto-stop timer,
     // and a 2-second poll that keeps the badge honest if TypeWhisper stops on its own.
     private void BeginRecordingState()
     {
         _recording = true;
         _recordingSince = Environment.TickCount64;
         _syncMisses = 0;
-        // Leaving the guard disarmed is what disables the feature: no target is
-        // captured, so no focus change can cut the recording short.
-        if (_settings.GuardFocusChanges) _guard.CaptureTarget();
         _recordingTimeout?.Dispose();
         _recordingTimeout = new System.Threading.Timer(_ => Enqueue(Cmd.AutoStop), null,
             TimeSpan.FromMinutes(_settings.AutoStopMinutes), Timeout.InfiniteTimeSpan);
@@ -626,7 +588,6 @@ sealed class TrayApp : ApplicationContext, IPanelHost
 
     private void ClearRecordingState()
     {
-        _guard.Disarm();
         _recordingTimeout?.Dispose();
         _recordingTimeout = null;
         _syncTimer?.Dispose();
@@ -1091,7 +1052,6 @@ sealed class TrayApp : ApplicationContext, IPanelHost
             _syncTimer?.Dispose();
             _hookWatchdog.Dispose();
             _hook.Dispose();
-            _guard.Dispose();
             _overlay.Dispose();
             _showPanelWait.Unregister(null);
             _showPanelEvent.Dispose();
